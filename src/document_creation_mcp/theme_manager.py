@@ -7,6 +7,13 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 
+class ControlNetConfig(BaseModel):
+    enabled: bool = False
+    type: str = "depth"  # depth | canny | openpose | tile (Union control type)
+    strength: float = 0.6
+    reference_image: str | None = None
+
+
 class Theme(BaseModel):
     name: str
     colors: dict[str, str] = Field(
@@ -26,6 +33,20 @@ class Theme(BaseModel):
     layout_default: str = "title_and_content"
     # Optional logo placed on every slide (path or URL).
     logo: str | None = None
+
+    # --- Image-consistency settings (used by the comfy_api backend) ---
+    # A single reference image fed to IP-Adapter so every deck image shares
+    # the same style/colour mood. Path or URL.
+    style_reference_image: str | None = None
+    ip_adapter_weight: float = 0.7
+    controlnet: ControlNetConfig = Field(default_factory=ControlNetConfig)
+    # ESRGAN model name for the final upscale, e.g. "4x-UltraSharp.pth".
+    upscale_model: str | None = None
+    # Deck-wide negative prompt appended to every image.
+    negative_prompt: str | None = None
+    # Post-process applied to background/full-bleed images so text stays
+    # readable: "dim", "blur", or "dim+blur".
+    background_post: str | None = None
 
 
 class ThemeManager:

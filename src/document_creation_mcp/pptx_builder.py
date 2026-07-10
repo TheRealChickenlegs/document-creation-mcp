@@ -93,20 +93,43 @@ def _add_logo(slide, theme: Theme) -> None:
 
 async def _resolve_image(slide: SlideSpec, theme: Theme) -> str | None:
     from . import comfy_client
+    from .config import get_settings
 
     img = slide.image
     if img is None:
         return None
     if img.source:
-        return img.source
-    prompt = img.prompt
-    if img.use_theme_style and theme.image_style:
-        prompt = f"{prompt}, {theme.image_style}"
-    return await comfy_client.generate_image(
-        prompt,
-        negative_prompt=img.negative_prompt,
-        size=img.size,
-    )
+        src = img.source
+    else:
+        prompt = img.prompt
+        if img.use_theme_style and theme.image_style:
+            prompt = f"{prompt}, {theme.image_style}"
+        src = await comfy_client.generate_image(
+            prompt,
+            negative_prompt=img.negative_prompt,
+            size=img.size,
+            theme=theme,
+        )
+
+    # Post-process backgrounds/full-bleed images so overlaid text stays readable.
+    is_background = img.target == "background" or slide.layout == "image_full"
+    if is_background and getattr(theme, "background_post", None):
+        src = _postprocess_background(src, theme.background_post, get_settings().image_cache_dir)
+    return src
+
+
+def _postprocess_background(src: str, mode: str, cache_dir: Path) -> str:
+    from PIL import Image, ImageFilter
+
+    im = Image.open(src).convert("RGB")
+    if "blur" in mode:
+        im = im.filter(ImageFilter.GaussianBlur(3))
+    if "dim" in mode:
+        overlay = Image.new("RGB", im.size, (0, 0, 0))
+        im = Image.blend(im, overlay, 0.45)
+    out = cache_dir / f"bg_{Path(src).stem}.png"
+    im.save(out)
+    return str(out)
 
 
 def _layout_title(slide, spec: SlideSpec, theme: Theme) -> None:

@@ -11,3 +11,14 @@ fonts:
 image_style: "professional, clean studio lighting, corporate photography, sharp, no text"
 layout_default: title_and_content
 logo: null
+# --- image consistency (comfy_api backend) ---
+# style_reference_image: "themes/refs/corporate_style.png"
+ip_adapter_weight: 0.7
+controlnet:
+  enabled: false
+  type: depth
+  strength: 0.6
+  reference_image: null
+upscale_model: "4x-UltraSharp.pth"
+negative_prompt: "watermark, text, blurry, low quality, jpeg artifacts, cartoon, illustration"
+background_post: "dim"

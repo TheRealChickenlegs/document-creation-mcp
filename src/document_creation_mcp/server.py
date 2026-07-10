@@ -50,7 +50,7 @@ async def generate_image(
     if theme_obj.image_style:
         full_prompt = f"{prompt}, {theme_obj.image_style}"
     return await comfy_client.generate_image(
-        full_prompt, negative_prompt=negative_prompt, size=size
+        full_prompt, negative_prompt=negative_prompt, size=size, theme=theme_obj
     )
 
 

@@ -30,21 +30,30 @@ async def generate_image(
     negative_prompt: str | None = None,
     size: str = "1024x1024",
     tool_name: str | None = None,
+    theme=None,
 ) -> str:
     """Generate an image and return a local file path.
 
     Dispatches to the configured backend:
       - "mcp"       -> remote ComfyUI MCP server (HTTP/SSE)
       - "comfy_api" -> ComfyUI HTTP API directly
+
+    When `theme` (a Theme) is supplied, its `negative_prompt` is merged in and,
+    for the `comfy_api` backend, its style-reference / ControlNet / upscale
+    settings drive the consistency pipeline.
     """
     settings = get_settings()
     if settings.disable_images:
         raise ComfyClientError("Image generation is disabled (DOC_MCP_DISABLE_IMAGES=true).")
 
+    # Merge the deck/theme-wide negative prompt.
+    parts = [p for p in (negative_prompt, getattr(theme, "negative_prompt", None)) if p]
+    effective_neg = "; ".join(parts) or None
+
     width, height = _parse_size(size)
     if settings.image_backend == "comfy_api":
-        return await generate_image_via_api(prompt, negative_prompt, width, height)
-    return await generate_image_via_mcp(prompt, negative_prompt, width, height, tool_name)
+        return await generate_image_via_api(prompt, effective_neg, width, height, theme)
+    return await generate_image_via_mcp(prompt, effective_neg, width, height, tool_name)
 
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +185,7 @@ def _substitute(obj, mapping: dict):
 
 
 def _build_workflow(
+    raw: dict,
     prompt: str,
     negative: str,
     width: int,
@@ -187,13 +197,13 @@ def _build_workflow(
     sampler: str,
     scheduler: str,
     seed: int,
+    style_image: str = "",
+    ip_weight: float = 0.7,
+    control_image: str = "",
+    control_strength: float = 0.0,
+    control_type: str = "depth",
+    upscale_model: str = "",
 ) -> dict:
-    settings = get_settings()
-    if settings.comfy_api_workflow:
-        raw = json.loads(Path(settings.comfy_api_workflow).read_text(encoding="utf-8"))
-    else:
-        raw = _default_workflow()
-
     mapping = {
         "{{prompt}}": prompt,
         "{{negative_prompt}}": negative or "",
@@ -205,6 +215,12 @@ def _build_workflow(
         "{{cfg}}": cfg,
         "{{sampler}}": sampler,
         "{{scheduler}}": scheduler,
+        "{{style_image}}": style_image,
+        "{{ip_weight}}": ip_weight,
+        "{{control_image}}": control_image,
+        "{{control_strength}}": control_strength,
+        "{{control_type}}": control_type,
+        "{{upscale_model}}": upscale_model,
     }
     return _substitute(raw, mapping)
 
@@ -269,6 +285,7 @@ async def generate_image_via_api(
     negative_prompt: str | None,
     width: int,
     height: int,
+    theme=None,
 ) -> str:
     settings = get_settings()
     if not settings.comfy_api_url:
@@ -276,6 +293,24 @@ async def generate_image_via_api(
 
     base = settings.comfy_api_url.rstrip("/")
     headers = settings.comfy_auth_headers()
+
+    # --- Consistency values from the theme (IP-Adapter / ControlNet / upscale) ---
+    style_image = getattr(theme, "style_reference_image", None) or ""
+    ip_weight = getattr(theme, "ip_adapter_weight", 0.7) or 0.7
+    cn = getattr(theme, "controlnet", None)
+    control_enabled = bool(cn and getattr(cn, "enabled", False))
+    control_image = (getattr(cn, "reference_image", None) if cn else None) or style_image
+    control_strength = getattr(cn, "strength", 0.6) if control_enabled else 0.0
+    control_type = getattr(cn, "type", "depth") or "depth"
+    upscale_model = getattr(theme, "upscale_model", None) or "4x-UltraSharp.pth"
+
+    # Use the user's advanced workflow template only when it can actually run:
+    # it requires a style-reference image for the IP-Adapter LoadImage node.
+    use_advanced = bool(settings.comfy_api_workflow and style_image)
+    if use_advanced:
+        raw = json.loads(Path(settings.comfy_api_workflow).read_text(encoding="utf-8"))
+    else:
+        raw = _default_workflow()
 
     checkpoint = settings.comfy_api_checkpoint
     sampler = settings.comfy_api_sampler
@@ -292,6 +327,7 @@ async def generate_image_via_api(
 
     seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
     workflow = _build_workflow(
+        raw,
         prompt,
         negative_prompt,
         width,
@@ -302,6 +338,12 @@ async def generate_image_via_api(
         sampler=sampler,
         scheduler=scheduler,
         seed=seed,
+        style_image=style_image,
+        ip_weight=ip_weight,
+        control_image=control_image,
+        control_strength=control_strength,
+        control_type=control_type,
+        upscale_model=upscale_model,
     )
     client_id = uuid.uuid4().hex
 

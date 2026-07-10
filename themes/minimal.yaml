@@ -11,3 +11,14 @@ fonts:
 image_style: "minimalist, lots of negative space, soft muted palette, editorial"
 layout_default: title_and_content
 logo: null
+# --- image consistency (comfy_api backend) ---
+# style_reference_image: "themes/refs/minimal_style.png"
+ip_adapter_weight: 0.6
+controlnet:
+  enabled: false
+  type: depth
+  strength: 0.5
+  reference_image: null
+upscale_model: "4x-UltraSharp.pth"
+negative_prompt: "watermark, text, blurry, low quality, jpeg artifacts, busy, cluttered"
+background_post: "dim"
