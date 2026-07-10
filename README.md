@@ -32,12 +32,22 @@ pip install -e .
 |----------|---------|---------|
 | `DOC_MCP_OUTPUT_DIR` | `output` | Where `.pptx` files are written. |
 | `DOC_MCP_IMAGE_DIR` | `output/images` | Where generated images are cached. |
+| `IMAGE_BACKEND` | `mcp` | Image source: `mcp` (remote ComfyUI MCP server) or `comfy_api` (ComfyUI HTTP API directly). |
+| **MCP backend** (`IMAGE_BACKEND=mcp`) | | |
 | `COMFY_MCP_URL` | _(none)_ | Address of your running ComfyUI MCP server, e.g. `http://comfyui-mcp:8000/mcp` or `.../sse`. |
 | `COMFY_MCP_API_KEY` | _(none)_ | Bearer token sent as `Authorization: Bearer <key>` (if the server requires auth). |
 | `COMFY_MCP_TRANSPORT` | `auto` | `auto` (detect from URL), `streamable-http`, or `sse`. |
 | `COMFY_MCP_TOOL` | `generate_image` | Name of the image tool in that server. |
-| `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation. |
 | `COMFY_MCP_COMMAND` | _(fallback)_ | Only used if `COMFY_MCP_URL` is unset, to spawn a stdio subprocess. |
+| **Direct API backend** (`IMAGE_BACKEND=comfy_api`) | | |
+| `COMFY_API_URL` | _(none)_ | Base URL of the ComfyUI instance, e.g. `http://comfyui:8188`. |
+| `COMFY_API_KEY` | _(none)_ | Optional bearer token for the ComfyUI endpoint. |
+| `COMFY_API_WORKFLOW` | _(built-in)_ | Path to a JSON workflow template using `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, `{{seed}}`, `{{checkpoint}}`, `{{steps}}`, `{{cfg}}`, `{{sampler}}`, `{{scheduler}}`. |
+| `COMFY_API_CHECKPOINT` | `sd_xl_base_1.0.safetensors` | Checkpoint loaded by the default workflow. |
+| `COMFY_API_STEPS` / `COMFY_API_CFG` | `25` / `7.0` | KSampler steps / CFG scale. |
+| `COMFY_API_SAMPLER` / `COMFY_API_SCHEDULER` | `euler` / `normal` | KSampler sampler / scheduler. |
+| `COMFY_API_SEED` | `0` | Seed (`0` = random per request). |
+| `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation (both backends). |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 
 ## Run

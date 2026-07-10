@@ -15,10 +15,21 @@ services:
       DOC_MCP_IMAGE_DIR: /app/output/images
       # Reach your already-running ComfyUI MCP server over the network.
       # Use ".../mcp" for streamable-http or ".../sse" for SSE.
+      # Set IMAGE_BACKEND=comfy_api and COMFY_API_URL instead to hit the
+      # ComfyUI HTTP API directly.
+      IMAGE_BACKEND: "mcp"
       COMFY_MCP_URL: "http://comfyui-mcp:8000/mcp"
       COMFY_MCP_API_KEY: "${COMFY_MCP_API_KEY:-}"
       # COMFY_MCP_TRANSPORT: auto   # auto detects from URL; or set sse / streamable-http
       # COMFY_MCP_TOOL: generate_image
+      # --- direct ComfyUI HTTP API (set IMAGE_BACKEND=comfy_api) ---
+      # COMFY_API_URL: "http://comfyui:8188"
+      # COMFY_API_KEY: "${COMFY_API_KEY:-}"
+      # COMFY_API_CHECKPOINT: "sd_xl_base_1.0.safetensors"
+      # COMFY_API_STEPS: "25"
+      # COMFY_API_CFG: "7.0"
+      # COMFY_API_SAMPLER: "euler"
+      # COMFY_API_SCHEDULER: "normal"
       # DOC_MCP_DISABLE_IMAGES: "false"
     volumes:
       - ./output:/app/output

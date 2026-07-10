@@ -23,6 +23,12 @@ class Settings:
         )
         self.image_cache_dir.mkdir(parents=True, exist_ok=True)
 
+        # Which backend generates images.
+        #   "mcp"       -> call a remote ComfyUI MCP server (over HTTP/SSE)
+        #   "comfy_api" -> call the ComfyUI HTTP API directly
+        self.image_backend: str = os.environ.get("IMAGE_BACKEND", "mcp").lower()
+
+        # --- Remote ComfyUI MCP server (backend = "mcp") ---
         # Network address of an already-running ComfyUI MCP server.
         # e.g. "http://comfyui-mcp:8000/mcp" (streamable-http) or
         #      "http://comfyui-mcp:8000/sse" (SSE).
@@ -42,7 +48,22 @@ class Settings:
         # Name of the image-generation tool exposed by the ComfyUI MCP server.
         self.comfy_image_tool: str = os.environ.get("COMFY_MCP_TOOL", "generate_image")
 
-        # Seconds to wait for the ComfyUI MCP server to respond.
+        # --- Direct ComfyUI HTTP API (backend = "comfy_api") ---
+        # Base URL of the ComfyUI instance, e.g. "http://comfyui:8188".
+        self.comfy_api_url: str | None = os.environ.get("COMFY_API_URL")
+        self.comfy_api_key: str | None = os.environ.get("COMFY_API_KEY")
+        # Optional path to a JSON workflow template using {{placeholders}}.
+        self.comfy_api_workflow: str | None = os.environ.get("COMFY_API_WORKFLOW")
+        self.comfy_api_checkpoint: str = os.environ.get(
+            "COMFY_API_CHECKPOINT", "sd_xl_base_1.0.safetensors"
+        )
+        self.comfy_api_steps: int = int(os.environ.get("COMFY_API_STEPS", "25"))
+        self.comfy_api_cfg: float = float(os.environ.get("COMFY_API_CFG", "7.0"))
+        self.comfy_api_sampler: str = os.environ.get("COMFY_API_SAMPLER", "euler")
+        self.comfy_api_scheduler: str = os.environ.get("COMFY_API_SCHEDULER", "normal")
+        self.comfy_api_seed: int = int(os.environ.get("COMFY_API_SEED", "0"))
+
+        # Seconds to wait for the ComfyUI MCP/API server to respond.
         self.comfy_timeout: float = float(os.environ.get("COMFY_MCP_TIMEOUT", "300"))
 
         # If true, image generation is skipped and image specs are ignored.
@@ -51,8 +72,9 @@ class Settings:
         )
 
     def comfy_auth_headers(self) -> dict[str, str]:
-        if self.comfy_mcp_api_key:
-            return {"Authorization": f"Bearer {self.comfy_mcp_api_key}"}
+        key = self.comfy_mcp_api_key or self.comfy_api_key
+        if key:
+            return {"Authorization": f"Bearer {key}"}
         return {}
 
 
