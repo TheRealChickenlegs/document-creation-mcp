@@ -97,7 +97,15 @@ async def create_presentation(plan_json: str) -> str:
 
 
 def main() -> None:
-    mcp.run()
+    import os
+
+    transport = os.environ.get("DOC_MCP_TRANSPORT", "stdio")
+    host = os.environ.get("DOC_MCP_HOST", "0.0.0.0")
+    port = int(os.environ.get("DOC_MCP_PORT", "8000"))
+    if transport in ("sse", "streamable-http"):
+        mcp.run(transport=transport, host=host, port=port)
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

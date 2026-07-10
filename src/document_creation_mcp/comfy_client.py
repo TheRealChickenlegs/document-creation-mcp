@@ -22,6 +22,12 @@ def _parse_size(size: str) -> tuple[int, int]:
         return 1024, 1024
 
 
+def _resolve_transport(url: str, configured: str) -> str:
+    if configured != "auto":
+        return configured
+    return "sse" if url.rstrip("/").endswith("/sse") else "streamable-http"
+
+
 async def generate_image(
     prompt: str,
     *,
@@ -29,32 +35,41 @@ async def generate_image(
     size: str = "1024x1024",
     tool_name: str | None = None,
 ) -> str:
-    """Generate an image via the ComfyUI MCP server and return a local file path.
+    """Generate an image via a running ComfyUI MCP server and return a local path.
 
-    Connects to the configured ComfyUI MCP server, invokes its image tool, then
-    downloads/decodes the result into the image cache directory.
+    Connects over the network (streamable-http or SSE) to the configured server,
+    invokes its image tool, then downloads/decodes the result into the image
+    cache directory.
     """
     settings = get_settings()
     if settings.disable_images:
         raise ComfyClientError("Image generation is disabled (DOC_MCP_DISABLE_IMAGES=true).")
+    if not settings.comfy_mcp_url:
+        raise ComfyClientError(
+            "COMFY_MCP_URL is not set. Point it at your running ComfyUI MCP server."
+        )
+
+    from mcp import ClientSession
 
     tool = tool_name or settings.comfy_image_tool
     width, height = _parse_size(size)
+    transport = _resolve_transport(settings.comfy_mcp_url, settings.comfy_mcp_transport)
+    headers = settings.comfy_auth_headers()
 
-    from contextlib import asynccontextmanager
+    if transport == "sse":
+        from mcp.client.sse import sse_client
 
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+        client_cm = sse_client(settings.comfy_mcp_url, headers=headers or None)
+    else:
+        from mcp.client.streamable_http import streamablehttp_client
 
-    params = StdioServerParameters(
-        command=settings.comfy_mcp_command[0],
-        args=settings.comfy_mcp_command[1:],
-    )
+        client_cm = streamablehttp_client(
+            settings.comfy_mcp_url, headers=headers or None
+        )
 
-    async with stdio_client(params) as (read, write):
+    async with client_cm as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-
             arguments = {
                 "prompt": prompt,
                 "negative_prompt": negative_prompt or "",
@@ -132,15 +147,15 @@ def _resolve_source(source: str, cache_dir: Path) -> str:
 
 
 def _download(url: str, cache_dir: Path) -> str:
-    import asyncio
-
     out = cache_dir / f"img_download_{abs(hash(url))}.png"
 
     async def _get() -> bytes:
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=get_settings().comfy_auth_headers() or None)
             resp.raise_for_status()
             return resp.content
+
+    import asyncio
 
     data = asyncio.get_event_loop().run_until_complete(_get())
     out.write_bytes(data)

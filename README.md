@@ -32,9 +32,12 @@ pip install -e .
 |----------|---------|---------|
 | `DOC_MCP_OUTPUT_DIR` | `output` | Where `.pptx` files are written. |
 | `DOC_MCP_IMAGE_DIR` | `output/images` | Where generated images are cached. |
-| `COMFY_MCP_COMMAND` | `["python","-m","comfy_mcp_server"]` | How to launch the ComfyUI MCP server (stdio). |
+| `COMFY_MCP_URL` | _(none)_ | Address of your running ComfyUI MCP server, e.g. `http://comfyui-mcp:8000/mcp` or `.../sse`. |
+| `COMFY_MCP_API_KEY` | _(none)_ | Bearer token sent as `Authorization: Bearer <key>` (if the server requires auth). |
+| `COMFY_MCP_TRANSPORT` | `auto` | `auto` (detect from URL), `streamable-http`, or `sse`. |
 | `COMFY_MCP_TOOL` | `generate_image` | Name of the image tool in that server. |
 | `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation. |
+| `COMFY_MCP_COMMAND` | _(fallback)_ | Only used if `COMFY_MCP_URL` is unset, to spawn a stdio subprocess. |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 
 ## Run
@@ -44,6 +47,32 @@ document-creation-mcp            # stdio transport (recommended for Open WebUI)
 # or: python -m document_creation_mcp.server
 ```
 
+## Docker
+
+Build and run the server inside a container.
+
+```bash
+# Build the image
+docker build -t document-creation-mcp .
+
+# Run with streamable-http transport (default in the Dockerfile)
+docker run -p 8000:8000 \
+  -e COMFY_MCP_COMMAND='["python","-m","comfy_mcp_server"]' \
+  -v "$(pwd)/output:/app/output" \
+  document-creation-mcp
+```
+
+Or use the provided Compose file:
+
+```bash
+docker compose up --build
+```
+
+The container serves on port `8000` using `streamable-http` by default. Generated
+`.pptx` files are written to `/app/output` (mount `./output` to retrieve them).
+Override `DOC_MCP_TRANSPORT=stdio` if you instead want the container spawned as a
+stdio MCP server by its parent.
+
 ## Open WebUI setup
 
 1. Start your ComfyUI MCP server separately (the command above must reach it).
@@ -51,6 +80,10 @@ document-creation-mcp            # stdio transport (recommended for Open WebUI)
    (stdio command: `document-creation-mcp`, or an SSE URL if you wrap it).
 3. The model can now call `create_presentation` (after doing web search and
    drafting the plan) and `generate_image` for bespoke visuals.
+
+When running this server in Docker, register it as an HTTP/SSE MCP server
+pointing at `http://<host>:8000/mcp` (streamable-http) or `/sse` instead of the
+stdio command.
 
 ## Themes
 

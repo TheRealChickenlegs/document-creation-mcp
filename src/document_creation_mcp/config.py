@@ -23,8 +23,16 @@ class Settings:
         )
         self.image_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # How to launch the ComfyUI MCP server as a subprocess (stdio transport).
-        # Override with a JSON array, e.g. '["python","-m","comfy_mcp_server"]'.
+        # Network address of an already-running ComfyUI MCP server.
+        # e.g. "http://comfyui-mcp:8000/mcp" (streamable-http) or
+        #      "http://comfyui-mcp:8000/sse" (SSE).
+        self.comfy_mcp_url: str | None = os.environ.get("COMFY_MCP_URL")
+        self.comfy_mcp_api_key: str | None = os.environ.get("COMFY_MCP_API_KEY")
+        self.comfy_mcp_transport: str = os.environ.get(
+            "COMFY_MCP_TRANSPORT", "auto"
+        ).lower()
+
+        # Optional fallback: launch the ComfyUI MCP server as a subprocess (stdio).
         raw = os.environ.get(
             "COMFY_MCP_COMMAND",
             '["python", "-m", "comfy_mcp_server"]',
@@ -41,6 +49,11 @@ class Settings:
         self.disable_images: bool = (
             os.environ.get("DOC_MCP_DISABLE_IMAGES", "false").lower() == "true"
         )
+
+    def comfy_auth_headers(self) -> dict[str, str]:
+        if self.comfy_mcp_api_key:
+            return {"Authorization": f"Bearer {self.comfy_mcp_api_key}"}
+        return {}
 
 
 def _parse_command(raw: str) -> list[str]:
