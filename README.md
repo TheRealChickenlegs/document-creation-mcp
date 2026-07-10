@@ -120,6 +120,79 @@ logo: null
 `image_style` is appended to every generated image prompt for visual consistency.
 Add a new YAML file to register a new theme automatically.
 
+## Recommended ComfyUI model stack for consistent decks
+
+To get cohesive, on-brand imagery across an entire deck (not just one-off
+pictures), run an **SDXL** base with **IP-Adapter** for style/subject consistency
+and **ControlNet** for composition control, then **upscale** for projector-grade
+output. The pipeline below is what `IMAGE_BACKEND=comfy_api` is designed to drive
+(see `comfy_workflows/presentation_sdxl.json` for a ready-to-adapt template).
+
+### What to install
+
+| Purpose | Suggested model(s) | Notes |
+|---------|--------------------|-------|
+| **Base checkpoint** | `juggernautXL_v9Rundiffusion.safetensors` (general), or `RealVisXL` (photoreal/corporate), or `DreamShaper XL` (stylised) | Pick **one** per deck; set it as `COMFY_API_CHECKPOINT`. |
+| **VAE** | `sdxl_vae.safetensors` | Usually bundled with the checkpoint. |
+| **CLIP Vision** (IP-Adapter dependency) | `CLIP-ViT-H-14-laion2b-s32B-b79K.safetensors` | Required by IP-Adapter. |
+| **IP-Adapter** | `ip-adapter-plus_sdxl_vit-h.safetensors` (style+composition) and/or `ip-adapter-plus-face_sdxl_vit-h.safetensors` (face/character lock) | Drives consistency from a single **style reference image**. |
+| **ControlNet** | `controlnet-union-sdxl-1.0.safetensors` (all-in-one: depth/canny/pose/tile) | One file covers every composition mode. |
+| **Upscaler** | `4x-UltraSharp.pth` (or `4x_NMKD-Siax_200k.pth`) | ESRGAN; sharpens the final 16:9 output. |
+| **(Optional) Style LoRA** | any brand/style LoRA | Extra brand lock on top of IP-Adapter. |
+| **Custom nodes** | `ComfyUI_IPAdapter_plus`, `ComfyUI_ControlNet_Union` (or `ComfyUI-Advanced-ControlNet`) | Provide the `IPAdapter` / `ControlNetApplyAdvanced` nodes used by the template. |
+
+> The exact node class names/inputs vary slightly between custom-node versions.
+> Treat `comfy_workflows/presentation_sdxl.json` as a **reference** to adapt to
+> your installed node pack, then point `COMFY_API_WORKFLOW` at it.
+
+### How consistency is enforced (the strategy)
+
+1. **One style reference image per theme.** Store a reference image in the theme
+   (e.g. `style_reference_image`) and feed it to IP-Adapter at a moderate weight
+   (~0.6–0.8). Every slide image in that deck inherits the same look/colour
+   mood — this is the single biggest lever for cohesion.
+2. **Shared negative prompt + colour palette.** Bake a deck-wide negative
+   (`watermark, text, blurry, low quality, jpeg artifacts`) and append the
+   theme's `image_style` to every prompt (already done by `generate_image`).
+3. **Composition control with ControlNet.** Use a "subject-off-centre" control
+   image (or Union `type: depth/canny`) so subjects sit left/right, leaving
+   negative space for titles and bullet text — especially for `image_full`
+   backgrounds.
+4. **Fixed resolutions per role.** Backgrounds: **16:9 → 1344×768** (or
+   1536×864). Content/side images: **1:1 → 1024×1024** or **4:3 → 1152×896**.
+   All divisible by 8 for SDXL.
+5. **Upscale once at the end** for crisp projection.
+6. **(Optional) per-deck seed base.** Generate with a fixed base seed + per-slide
+   offset for reproducible backgrounds while keeping variety.
+
+### Planned integration (not yet wired)
+
+Once the models above are installed locally, the call path will be extended to
+use them automatically via theme options, e.g.:
+
+```yaml
+name: dark_tech
+# ...existing colors/fonts...
+image_style: "cinematic, neon accents, dark moody background, 8k, highly detailed"
+style_reference_image: "themes/refs/dark_tech_style.png"  # fed to IP-Adapter
+ip_adapter_weight: 0.7
+controlnet:
+  enabled: true
+  type: depth          # depth | canny | openpose | tile
+  strength: 0.6
+  reference_image: "themes/refs/dark_tech_comp.png"
+upscale_model: "4x-UltraSharp.pth"
+negative_prompt: "watermark, text, blurry, low quality, jpeg artifacts"
+background_post: "dim"   # light blur + dark overlay so text stays readable
+```
+
+The `comfy_api` backend will then load `COMFY_API_WORKFLOW` (the IP-Adapter +
+ControlNet + upscale graph) and substitute `{{style_image}}`, `{{ip_weight}}`,
+`{{control_image}}`, `{{control_strength}}`, `{{upscale_model}}` from the theme,
+alongside the existing `{{prompt}}` / `{{width}}` / `{{height}}` / `{{seed}}`
+placeholders. Background images will also get a subtle dim/blur post-process so
+titles read clearly. See `comfy_workflows/presentation_sdxl.json`.
+
 ## Slide plan schema
 
 ```json
