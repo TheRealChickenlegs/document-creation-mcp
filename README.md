@@ -33,6 +33,9 @@ pip install -e .
 |----------|---------|---------|
 | `DOC_MCP_OUTPUT_DIR` | `output` | Where `.pptx` files are written. |
 | `DOC_MCP_IMAGE_DIR` | `output/images` | Where generated images are cached. |
+| `DOC_MCP_TRANSPORT` | `stdio` | Transport for the server itself: `stdio`, `sse`, or `streamable-http`. |
+| `DOC_MCP_HOST` | `127.0.0.1` | Bind address when serving over HTTP/SSE. Defaults to localhost for security; set `0.0.0.0` to expose on the network (e.g. from Docker). |
+| `DOC_MCP_PORT` | `8000` | Port the server listens on for `sse` / `streamable-http`. |
 | `IMAGE_BACKEND` | `mcp` | Image source: `mcp` (remote ComfyUI MCP server) or `comfy_api` (ComfyUI HTTP API directly). |
 | **MCP backend** (`IMAGE_BACKEND=mcp`) | | |
 | `COMFY_MCP_URL` | _(none)_ | Address of your running ComfyUI MCP server, e.g. `http://comfyui-mcp:8000/mcp` or `.../sse`. |

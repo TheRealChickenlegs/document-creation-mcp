@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -10,7 +11,10 @@ from .config import get_settings
 from .models import ImageSpec, PresentationPlan, SlideSpec
 from .pptx_builder import build_presentation
 
-mcp = FastMCP("document-creation-mcp")
+_HOST = os.environ.get("DOC_MCP_HOST", "127.0.0.1")
+_PORT = int(os.environ.get("DOC_MCP_PORT", "8000"))
+
+mcp = FastMCP("document-creation-mcp", host=_HOST, port=_PORT)
 
 
 @mcp.tool()
@@ -114,13 +118,9 @@ async def create_presentation(plan_json: str) -> str:
 
 
 def main() -> None:
-    import os
-
     transport = os.environ.get("DOC_MCP_TRANSPORT", "stdio")
-    host = os.environ.get("DOC_MCP_HOST", "0.0.0.0")
-    port = int(os.environ.get("DOC_MCP_PORT", "8000"))
     if transport in ("sse", "streamable-http"):
-        mcp.run(transport=transport, host=host, port=port)
+        mcp.run(transport=transport)
     else:
         mcp.run()
 
