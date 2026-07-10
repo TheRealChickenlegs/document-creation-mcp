@@ -55,6 +55,23 @@ async def generate_image(
 
 
 @mcp.tool()
+async def list_comfy_models() -> str:
+    """List models available on the ComfyUI HTTP API (checkpoints/samplers/schedulers).
+
+    Useful to see what the direct `comfy_api` backend can use, and to pick a
+    value for COMFY_API_CHECKPOINT. Requires IMAGE_BACKEND=comfy_api and
+    COMFY_API_URL to be set.
+    """
+    from . import comfy_client
+
+    try:
+        models = await comfy_client.discover_comfy_models()
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+    return json.dumps(models)
+
+
+@mcp.tool()
 async def create_presentation(plan_json: str) -> str:
     """Create a PowerPoint deck from a structured plan and return the file path.
 

@@ -62,6 +62,11 @@ class Settings:
         self.comfy_api_sampler: str = os.environ.get("COMFY_API_SAMPLER", "euler")
         self.comfy_api_scheduler: str = os.environ.get("COMFY_API_SCHEDULER", "normal")
         self.comfy_api_seed: int = int(os.environ.get("COMFY_API_SEED", "0"))
+        # Auto-discover installed checkpoints/samplers from the ComfyUI API so
+        # the backend needs no manual model configuration.
+        self.comfy_api_autodiscover: bool = (
+            os.environ.get("COMFY_API_AUTODISCOVER", "true").lower() == "true"
+        )
 
         # Seconds to wait for the ComfyUI MCP/API server to respond.
         self.comfy_timeout: float = float(os.environ.get("COMFY_MCP_TIMEOUT", "300"))

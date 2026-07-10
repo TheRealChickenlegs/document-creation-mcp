@@ -175,26 +175,93 @@ def _substitute(obj, mapping: dict):
     return obj
 
 
-def _build_workflow(prompt: str, negative: str, width: int, height: int, settings) -> dict:
+def _build_workflow(
+    prompt: str,
+    negative: str,
+    width: int,
+    height: int,
+    *,
+    checkpoint: str,
+    steps: int,
+    cfg: float,
+    sampler: str,
+    scheduler: str,
+    seed: int,
+) -> dict:
+    settings = get_settings()
     if settings.comfy_api_workflow:
         raw = json.loads(Path(settings.comfy_api_workflow).read_text(encoding="utf-8"))
     else:
         raw = _default_workflow()
 
-    seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
     mapping = {
         "{{prompt}}": prompt,
         "{{negative_prompt}}": negative or "",
         "{{width}}": width,
         "{{height}}": height,
         "{{seed}}": seed,
-        "{{checkpoint}}": settings.comfy_api_checkpoint,
-        "{{steps}}": settings.comfy_api_steps,
-        "{{cfg}}": settings.comfy_api_cfg,
-        "{{sampler}}": settings.comfy_api_sampler,
-        "{{scheduler}}": settings.comfy_api_scheduler,
+        "{{checkpoint}}": checkpoint,
+        "{{steps}}": steps,
+        "{{cfg}}": cfg,
+        "{{sampler}}": sampler,
+        "{{scheduler}}": scheduler,
     }
     return _substitute(raw, mapping)
+
+
+# Auto-discovery of available models so the backend works with zero config.
+_DISCOVERY_CACHE: dict | None = None
+
+
+async def discover_comfy_models() -> dict:
+    """Query the ComfyUI API for installed checkpoints, samplers and schedulers."""
+    global _DISCOVERY_CACHE
+    if _DISCOVERY_CACHE is not None:
+        return _DISCOVERY_CACHE
+
+    settings = get_settings()
+    if not settings.comfy_api_url:
+        raise ComfyClientError("COMFY_API_URL is not set; cannot discover models.")
+    base = settings.comfy_api_url.rstrip("/")
+    headers = settings.comfy_auth_headers()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{base}/object_info", headers=headers or None)
+        resp.raise_for_status()
+        data = resp.json()
+
+    def _options(node: str, key: str) -> list[str]:
+        node_data = data.get(node, {})
+        required = node_data.get("input", {}).get("required", {})
+        entry = required.get(key, [[]])
+        vals = entry[0] if isinstance(entry, list) and entry and isinstance(entry[0], list) else []
+        return [str(v) for v in vals]
+
+    models = {
+        "checkpoints": _options("CheckpointLoaderSimple", "ckpt_name"),
+        "samplers": _options("KSampler", "sampler_name"),
+        "schedulers": _options("KSampler", "scheduler"),
+    }
+    _DISCOVERY_CACHE = models
+    return models
+
+
+def _pick_checkpoint(discovered: list[str], configured: str) -> str:
+    """Prefer an explicit config; otherwise auto-select (SDXL-style first)."""
+    if configured:
+        return configured
+    if not discovered:
+        return ""
+    for name in discovered:
+        if "xl" in name.lower():
+            return name
+    return discovered[0]
+
+
+def _coerce_to_known(value: str, discovered: list[str], fallback: str) -> str:
+    if discovered and value not in discovered:
+        return discovered[0]
+    return value
 
 
 async def generate_image_via_api(
@@ -209,7 +276,33 @@ async def generate_image_via_api(
 
     base = settings.comfy_api_url.rstrip("/")
     headers = settings.comfy_auth_headers()
-    workflow = _build_workflow(prompt, negative_prompt, width, height, settings)
+
+    checkpoint = settings.comfy_api_checkpoint
+    sampler = settings.comfy_api_sampler
+    scheduler = settings.comfy_api_scheduler
+    if settings.comfy_api_autodiscover:
+        models = await discover_comfy_models()
+        checkpoint = _pick_checkpoint(models["checkpoints"], checkpoint)
+        sampler = _coerce_to_known(sampler, models["samplers"], sampler)
+        scheduler = _coerce_to_known(scheduler, models["schedulers"], scheduler)
+        if not checkpoint:
+            raise ComfyClientError(
+                "No checkpoints found on the ComfyUI server and COMFY_API_CHECKPOINT is unset."
+            )
+
+    seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
+    workflow = _build_workflow(
+        prompt,
+        negative_prompt,
+        width,
+        height,
+        checkpoint=checkpoint,
+        steps=settings.comfy_api_steps,
+        cfg=settings.comfy_api_cfg,
+        sampler=sampler,
+        scheduler=scheduler,
+        seed=seed,
+    )
     client_id = uuid.uuid4().hex
 
     async with httpx.AsyncClient(timeout=settings.comfy_timeout) as client:

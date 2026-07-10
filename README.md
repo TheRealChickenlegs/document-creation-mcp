@@ -15,6 +15,7 @@ any web research and composes the slide plan, then calls these tools.
 | `get_theme(name)` | Return a theme's colors/fonts/image-style. |
 | `generate_image(prompt, theme, size, ...)` | Generate one image via ComfyUI MCP; returns local path. |
 | `create_presentation(plan_json)` | Build a deck from a `PresentationPlan` JSON; returns file path. |
+| `list_comfy_models()` | List checkpoints/samplers/schedulers available on the ComfyUI HTTP API. |
 
 `create_presentation` will auto-generate any image that has an `image.prompt`
 (using ComfyUI), and embed existing files/URLs when `image.source` is set.
@@ -47,6 +48,7 @@ pip install -e .
 | `COMFY_API_STEPS` / `COMFY_API_CFG` | `25` / `7.0` | KSampler steps / CFG scale. |
 | `COMFY_API_SAMPLER` / `COMFY_API_SCHEDULER` | `euler` / `normal` | KSampler sampler / scheduler. |
 | `COMFY_API_SEED` | `0` | Seed (`0` = random per request). |
+| `COMFY_API_AUTODISCOVER` | `true` | When enabled, the `comfy_api` backend queries `/object_info` and auto-selects an installed checkpoint (preferring SDXL-style names) plus a valid sampler/scheduler, so no manual model config is needed. |
 | `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation (both backends). |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 
