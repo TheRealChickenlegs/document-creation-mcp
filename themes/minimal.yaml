@@ -1,0 +1,13 @@
+name: minimal
+colors:
+  background: "#FAFAFA"
+  primary: "#111111"
+  accent: "#666666"
+  text: "#111111"
+  muted: "#999999"
+fonts:
+  heading: "Helvetica Neue"
+  body: "Helvetica Neue"
+image_style: "minimalist, lots of negative space, soft muted palette, editorial"
+layout_default: title_and_content
+logo: null

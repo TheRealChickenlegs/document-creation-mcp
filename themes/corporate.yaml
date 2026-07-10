@@ -1,0 +1,13 @@
+name: corporate
+colors:
+  background: "#FFFFFF"
+  primary: "#1F4E79"
+  accent: "#C55A11"
+  text: "#222222"
+  muted: "#595959"
+fonts:
+  heading: "Cambria"
+  body: "Calibri"
+image_style: "professional, clean studio lighting, corporate photography, sharp, no text"
+layout_default: title_and_content
+logo: null

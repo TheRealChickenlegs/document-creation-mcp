@@ -1,0 +1,13 @@
+name: dark_tech
+colors:
+  background: "#0B0E14"
+  primary: "#4F8CFF"
+  accent: "#00E0C6"
+  text: "#E6EAF2"
+  muted: "#8A93A6"
+fonts:
+  heading: "Montserrat"
+  body: "Inter"
+image_style: "cinematic, neon accents, dark moody background, 8k, highly detailed"
+layout_default: title_and_content
+logo: null
