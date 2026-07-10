@@ -36,6 +36,7 @@ pip install -e .
 | `DOC_MCP_TRANSPORT` | `stdio` | Transport for the server itself: `stdio`, `sse`, or `streamable-http`. |
 | `DOC_MCP_HOST` | `127.0.0.1` | Bind address when serving over HTTP/SSE. Defaults to localhost for security; set `0.0.0.0` to expose on the network (e.g. from Docker). |
 | `DOC_MCP_PORT` | `8000` | Port the server listens on for `sse` / `streamable-http`. |
+| `DOC_MCP_STREAMABLE_HTTP_PATH` | `/mcp` | Endpoint path for `streamable-http`. Set to `/` if your client POSTs to the server root (e.g. some MetaMCP configurations). |
 | `IMAGE_BACKEND` | `mcp` | Image source: `mcp` (remote ComfyUI MCP server) or `comfy_api` (ComfyUI HTTP API directly). |
 | **MCP backend** (`IMAGE_BACKEND=mcp`) | | |
 | `COMFY_MCP_URL` | _(none)_ | Address of your running ComfyUI MCP server, e.g. `http://comfyui-mcp:8000/mcp` or `.../sse`. |
@@ -99,6 +100,22 @@ stdio MCP server by its parent.
 When running this server in Docker, register it as an HTTP/SSE MCP server
 pointing at `http://<host>:8000/mcp` (streamable-http) or `/sse` instead of the
 stdio command.
+
+### Connecting over HTTP (Open WebUI / MetaMCP)
+
+- The server only listens for `sse` / `streamable-http` when
+  `DOC_MCP_TRANSPORT` is set to one of those (the Docker image defaults to
+  `streamable-http`).
+- It must be **reachable** from the client: set `DOC_MCP_HOST=0.0.0.0` and
+  publish the port (e.g. `ports: ["3335:3335"]` in Compose with
+  `DOC_MCP_PORT=3335`). A `Connection refused` means the container isn't up,
+  isn't on that port, or is bound to `127.0.0.1`.
+- The client URL must include the endpoint **path**:
+  - default → `http://<host>:<port>/mcp`
+  - if your client POSTs to the server root (some MetaMCP setups do), set
+    `DOC_MCP_STREAMABLE_HTTP_PATH=/` and use `http://<host>:<port>/`.
+  - A `404 Not Found` on a POST means the path didn't match — adjust
+    `DOC_MCP_STREAMABLE_HTTP_PATH` or add `/mcp` to the URL.
 
 ## Themes
 

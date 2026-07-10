@@ -13,8 +13,16 @@ from .pptx_builder import build_presentation
 
 _HOST = os.environ.get("DOC_MCP_HOST", "127.0.0.1")
 _PORT = int(os.environ.get("DOC_MCP_PORT", "8000"))
+# Path the streamable-HTTP endpoint is served at. Clients that POST to the
+# server root (e.g. some MetaMCP setups) need this set to "/".
+_STREAMABLE_HTTP_PATH = os.environ.get("DOC_MCP_STREAMABLE_HTTP_PATH", "/mcp")
 
-mcp = FastMCP("document-creation-mcp", host=_HOST, port=_PORT)
+mcp = FastMCP(
+    "document-creation-mcp",
+    host=_HOST,
+    port=_PORT,
+    streamable_http_path=_STREAMABLE_HTTP_PATH,
+)
 
 
 @mcp.tool()
