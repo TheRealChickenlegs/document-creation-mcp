@@ -50,24 +50,31 @@ class Theme(BaseModel):
 
 
 class ThemeManager:
-    """Loads and caches theme definitions from a directory of YAML files."""
+    """Loads and caches theme definitions from one or more YAML directories.
 
-    def __init__(self, themes_dir: str | Path) -> None:
-        self.themes_dir = Path(themes_dir)
+    Later directories override earlier ones with the same theme name, so an
+    external/user directory can override the bundled factory themes.
+    """
+
+    def __init__(self, themes_dirs: str | Path | list[str | Path]) -> None:
+        if isinstance(themes_dirs, (str, Path)):
+            themes_dirs = [themes_dirs]
+        self.themes_dirs = [Path(d) for d in themes_dirs]
         self._cache: dict[str, Theme] = {}
         self.reload()
 
     def reload(self) -> None:
         self._cache.clear()
-        if not self.themes_dir.exists():
-            return
-        for path in self.themes_dir.glob("*.y*ml"):
-            try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                theme = Theme(**data)
-                self._cache[theme.name] = theme
-            except (yaml.YAMLError, ValidationError) as exc:
-                raise ValueError(f"Invalid theme file {path}: {exc}") from exc
+        for directory in self.themes_dirs:
+            if not directory.exists():
+                continue
+            for path in directory.glob("*.y*ml"):
+                try:
+                    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                    theme = Theme(**data)
+                    self._cache[theme.name] = theme
+                except (yaml.YAMLError, ValidationError) as exc:
+                    raise ValueError(f"Invalid theme file {path}: {exc}") from exc
 
     def names(self) -> list[str]:
         return sorted(self._cache.keys())

@@ -37,6 +37,7 @@ pip install -e .
 | `DOC_MCP_HOST` | `127.0.0.1` | Bind address when serving over HTTP/SSE. Defaults to localhost for security; set `0.0.0.0` to expose on the network (e.g. from Docker). |
 | `DOC_MCP_PORT` | `8000` | Port the server listens on for `sse` / `streamable-http`. |
 | `DOC_MCP_STREAMABLE_HTTP_PATH` | `/mcp` | Endpoint path for `streamable-http`. Set to `/` if your client POSTs to the server root (e.g. some MetaMCP configurations). |
+| `DOC_MCP_THEME_DIR` | _(bundled)_ | Directory of `*.yaml` theme files, merged on top of the bundled themes. Set this (e.g. a mounted volume) to add or override themes. |
 | `IMAGE_BACKEND` | `mcp` | Image source: `mcp` (remote ComfyUI MCP server) or `comfy_api` (ComfyUI HTTP API directly). |
 | **MCP backend** (`IMAGE_BACKEND=mcp`) | | |
 | `COMFY_MCP_URL` | _(none)_ | Address of your running ComfyUI MCP server, e.g. `http://comfyui-mcp:8000/mcp` or `.../sse`. |
@@ -119,7 +120,9 @@ stdio command.
 
 ## Themes
 
-Themes live in `themes/*.yaml`:
+Factory themes ship **inside the package** at `src/document_creation_mcp/themes/*.yaml`
+(`dark_tech`, `corporate`, `minimal`, `academic`), so they are always available
+after install, including in Docker.
 
 ```yaml
 name: dark_tech
@@ -138,7 +141,18 @@ logo: null
 ```
 
 `image_style` is appended to every generated image prompt for visual consistency.
-Add a new YAML file to register a new theme automatically.
+
+**Add or override themes:** set `DOC_MCP_THEME_DIR` to a directory of `*.yaml`
+files (e.g. a mounted volume in Docker). Its themes are merged on top of the
+bundled ones, so a file with the same `name` overrides a factory theme.
+
+> Note: `style_reference_image` / `controlnet.reference_image` paths are resolved
+> at runtime — in Docker, mount those assets and use absolute paths (or paths
+> relative to the container working directory). The optional advanced workflow
+> `COMFY_API_WORKFLOW` similarly needs to be mounted into the container.
+
+To refresh after editing theme files, the server reloads them on startup; there
+is also a `list_themes()` tool to confirm what is loaded.
 
 ## Recommended ComfyUI model stack for consistent decks
 
