@@ -1,0 +1,24 @@
+name: academic
+colors:
+  background: "#FFFFFF"
+  primary: "#1F3A5F"
+  accent: "#9E1B32"
+  text: "#1A1A1A"
+  muted: "#666666"
+fonts:
+  heading: "Georgia"
+  body: "Calibri"
+image_style: "clean academic illustration, muted scholarly palette, textbook figure style, high detail, no text"
+layout_default: title_and_content
+logo: null
+# --- image consistency (comfy_api backend) ---
+# style_reference_image: "themes/refs/academic_style.png"
+ip_adapter_weight: 0.6
+controlnet:
+  enabled: false
+  type: depth
+  strength: 0.5
+  reference_image: null
+upscale_model: "4x-UltraSharp.pth"
+negative_prompt: "watermark, text, blurry, low quality, jpeg artifacts, cluttered, cartoon, illustration with words"
+background_post: "dim"
