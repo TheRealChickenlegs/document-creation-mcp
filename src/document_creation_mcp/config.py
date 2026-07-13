@@ -76,6 +76,13 @@ class Settings:
             os.environ.get("DOC_MCP_DISABLE_IMAGES", "false").lower() == "true"
         )
 
+        # When true, create_presentation returns the generated .pptx as base64
+        # in its result, so the file is retrievable through the chat client
+        # (Open WebUI) without needing host/volume access to the container.
+        self.return_base64: bool = (
+            os.environ.get("DOC_MCP_RETURN_BASE64", "true").lower() == "true"
+        )
+
     def comfy_auth_headers(self) -> dict[str, str]:
         key = self.comfy_mcp_api_key or self.comfy_api_key
         if key:

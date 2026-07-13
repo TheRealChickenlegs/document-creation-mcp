@@ -121,14 +121,25 @@ async def create_presentation(plan: PresentationPlan) -> str:
         return json.dumps({"error": str(exc)})
 
     out_path = await build_presentation(plan, theme, settings.output_dir)
-    return json.dumps(
-        {
-            "status": "ok",
-            "path": str(out_path),
-            "slide_count": len(plan.slides),
-            "theme": plan.theme,
+    result = {
+        "status": "ok",
+        "path": str(out_path),
+        "slide_count": len(plan.slides),
+        "theme": plan.theme,
+    }
+    if settings.return_base64:
+        import base64
+
+        data = base64.b64encode(out_path.read_bytes()).decode("ascii")
+        result["download"] = {
+            "filename": out_path.name,
+            "mime_type": (
+                "application/vnd.openxmlformats-officedocument."
+                "presentationml.presentation"
+            ),
+            "data": data,
         }
-    )
+    return json.dumps(result)
 
 
 def main() -> None:

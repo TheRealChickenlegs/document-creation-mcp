@@ -13,6 +13,9 @@ services:
       # Where generated decks are written (mounted so you can retrieve them).
       DOC_MCP_OUTPUT_DIR: /app/output
       DOC_MCP_IMAGE_DIR: /app/output/images
+      # Return the .pptx as base64 in the tool result so it is downloadable
+      # through the chat client without host/volume access.
+      DOC_MCP_RETURN_BASE64: "true"
       # Reach your already-running ComfyUI MCP server over the network.
       # Use ".../mcp" for streamable-http or ".../sse" for SSE.
       # Set IMAGE_BACKEND=comfy_api and COMFY_API_URL instead to hit the

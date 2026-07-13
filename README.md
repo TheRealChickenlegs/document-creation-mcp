@@ -57,6 +57,7 @@ pip install -e .
 | `COMFY_API_AUTODISCOVER` | `true` | When enabled, the `comfy_api` backend queries `/object_info` and auto-selects an installed checkpoint (preferring SDXL-style names) plus a valid sampler/scheduler, so no manual model config is needed. |
 | `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation (both backends). |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
+| `DOC_MCP_RETURN_BASE64` | `true` | When `true`, `create_presentation` includes the `.pptx` as base64 (`download` field) in its result so it is retrievable through the chat client without host access. Set `false` to return only the path (e.g. when the output dir is a mounted volume you read directly). |
 
 ## Run
 
@@ -121,6 +122,19 @@ stdio command.
     on `/mcp` (especially from different client IPs) are usually stateful-session
     rejects from a proxy; set `DOC_MCP_STATELESS_HTTP=true` (the default) so each
     request is handled without a session.
+
+### Retrieving generated files
+
+`create_presentation` writes the `.pptx` to `DOC_MCP_OUTPUT_DIR` and returns its
+path. Because the server runs in a container, that path is internal — to get the
+file:
+
+- **Recommended:** keep `DOC_MCP_RETURN_BASE64=true` (default). The tool result
+  includes a `download` field with `filename`, `mime_type` and base64 `data`.
+  Save/decode that to get the file through the chat client (Open WebUI).
+- **Alternatively:** mount `DOC_MCP_OUTPUT_DIR` as a volume (the Compose file
+  mounts `./output:/app/output`) and read `./output/<name>.pptx` from the host,
+  then set `DOC_MCP_RETURN_BASE64=false` to avoid the base64 in context.
 
 ## Themes
 
