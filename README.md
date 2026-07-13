@@ -37,6 +37,7 @@ pip install -e .
 | `DOC_MCP_HOST` | `127.0.0.1` | Bind address when serving over HTTP/SSE. Defaults to localhost for security; set `0.0.0.0` to expose on the network (e.g. from Docker). |
 | `DOC_MCP_PORT` | `8000` | Port the server listens on for `sse` / `streamable-http`. |
 | `DOC_MCP_STREAMABLE_HTTP_PATH` | `/mcp` | Endpoint path for `streamable-http`. Set to `/` if your client POSTs to the server root (e.g. some MetaMCP configurations). |
+| `DOC_MCP_STATELESS_HTTP` | `true` | Run streamable-http in stateless mode (no session). Recommended behind proxies (MetaMCP/Open WebUI) to avoid `404` on requests without a session id. Set `false` for strict stateful sessions. |
 | `DOC_MCP_THEME_DIR` | _(bundled)_ | Directory of `*.yaml` theme files, merged on top of the bundled themes. Set this (e.g. a mounted volume) to add or override themes. |
 | `IMAGE_BACKEND` | `mcp` | Image source: `mcp` (remote ComfyUI MCP server) or `comfy_api` (ComfyUI HTTP API directly). |
 | **MCP backend** (`IMAGE_BACKEND=mcp`) | | |
@@ -116,7 +117,10 @@ stdio command.
   - if your client POSTs to the server root (some MetaMCP setups do), set
     `DOC_MCP_STREAMABLE_HTTP_PATH=/` and use `http://<host>:<port>/`.
   - A `404 Not Found` on a POST means the path didn't match — adjust
-    `DOC_MCP_STREAMABLE_HTTP_PATH` or add `/mcp` to the URL.
+    `DOC_MCP_STREAMABLE_HTTP_PATH` or add `/mcp` to the URL. Intermittent `404`s
+    on `/mcp` (especially from different client IPs) are usually stateful-session
+    rejects from a proxy; set `DOC_MCP_STATELESS_HTTP=true` (the default) so each
+    request is handled without a session.
 
 ## Themes
 

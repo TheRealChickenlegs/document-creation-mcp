@@ -16,12 +16,17 @@ _PORT = int(os.environ.get("DOC_MCP_PORT", "8000"))
 # Path the streamable-HTTP endpoint is served at. Clients that POST to the
 # server root (e.g. some MetaMCP setups) need this set to "/".
 _STREAMABLE_HTTP_PATH = os.environ.get("DOC_MCP_STREAMABLE_HTTP_PATH", "/mcp")
+# Stateless mode handles each request standalone (no session), which is far
+# more reliable behind proxies like MetaMCP/Open WebUI that may POST from
+# different nodes or without a session id (avoids 404s on /mcp).
+_STATELESS_HTTP = os.environ.get("DOC_MCP_STATELESS_HTTP", "true").lower() == "true"
 
 mcp = FastMCP(
     "document-creation-mcp",
     host=_HOST,
     port=_PORT,
     streamable_http_path=_STREAMABLE_HTTP_PATH,
+    stateless_http=_STATELESS_HTTP,
 )
 
 
