@@ -14,7 +14,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip && pip install ".[minio]"
 
 # ComfyUI MCP server network address (override at runtime).
 # The server connects to an already-running ComfyUI MCP server over HTTP/SSE.

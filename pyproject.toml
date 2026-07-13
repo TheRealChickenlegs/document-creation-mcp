@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "ruff>=0.5.0"]
+minio = ["minio>=7.2.0"]
 
 [project.scripts]
 document-creation-mcp = "document_creation_mcp.server:main"

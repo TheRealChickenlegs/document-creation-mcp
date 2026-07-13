@@ -58,6 +58,15 @@ pip install -e .
 | `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation (both backends). |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 | `DOC_MCP_RETURN_BASE64` | `true` | When `true`, `create_presentation` includes the `.pptx` as base64 (`download` field) in its result so it is retrievable through the chat client without host access. Set `false` to return only the path (e.g. when the output dir is a mounted volume you read directly). |
+| **MinIO / S3 retrieval** (`MINIO_ENDPOINT` set) | | |
+| `MINIO_ENDPOINT` | _(none)_ | MinIO/S3 endpoint, e.g. `minio:9000` or `localhost:9000`. Enables upload when set with keys. |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | _(none)_ | Credentials for the bucket. |
+| `MINIO_BUCKET` | `presentations` | Target bucket (created if missing). |
+| `MINIO_USE_HTTPS` | `false` | Use HTTPS to the endpoint (usually `false` internally). |
+| `MINIO_REGION` | _(none)_ | Optional region. |
+| `MINIO_PUBLIC_URL` | _(none)_ | If set (e.g. `https://minio.example.com/presentations`), a direct link is returned; otherwise a presigned GET URL is generated. |
+| `MINIO_PRESIGNED_EXPIRY_HOURS` | `168` | Lifetime (hours) of the presigned URL when no public URL is set. |
+| `MINIO_PREFIX` | _(none)_ | Object-name prefix inside the bucket, e.g. `decks/`. |
 
 ## Run
 
@@ -129,12 +138,20 @@ stdio command.
 path. Because the server runs in a container, that path is internal — to get the
 file:
 
-- **Recommended:** keep `DOC_MCP_RETURN_BASE64=true` (default). The tool result
-  includes a `download` field with `filename`, `mime_type` and base64 `data`.
-  Save/decode that to get the file through the chat client (Open WebUI).
-- **Alternatively:** mount `DOC_MCP_OUTPUT_DIR` as a volume (the Compose file
-  mounts `./output:/app/output`) and read `./output/<name>.pptx` from the host,
-  then set `DOC_MCP_RETURN_BASE64=false` to avoid the base64 in context.
+- **MinIO (best for shared access):** set `MINIO_ENDPOINT` (with keys). The tool
+  uploads the file and returns a `download.url` — a direct link if
+  `MINIO_PUBLIC_URL` is set, otherwise a presigned GET URL. Anyone with the link
+  can fetch the deck; the container needs the `minio` extra installed (the Docker
+  image includes it).
+- **Base64 (no infra):** keep `DOC_MCP_RETURN_BASE64=true` (default). The tool
+  result includes a `download` field with `filename`, `mime_type` and base64
+  `data`. Save/decode that to get the file through the chat client (Open WebUI).
+- **Mounted volume:** mount `DOC_MCP_OUTPUT_DIR` (the Compose file mounts
+  `./output:/app/output`) and read `./output/<name>.pptx` from the host, then set
+  `DOC_MCP_RETURN_BASE64=false` to avoid the base64 in context.
+
+The `download` object may contain any combination of `url`, `data` and
+`minio_error` (if an upload failed but the deck was still built).
 
 ## Themes
 

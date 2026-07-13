@@ -83,6 +83,27 @@ class Settings:
             os.environ.get("DOC_MCP_RETURN_BASE64", "true").lower() == "true"
         )
 
+        # --- Optional MinIO / S3-compatible object storage for retrieval ---
+        self.minio_endpoint: str | None = os.environ.get("MINIO_ENDPOINT")
+        self.minio_access_key: str | None = os.environ.get("MINIO_ACCESS_KEY")
+        self.minio_secret_key: str | None = os.environ.get("MINIO_SECRET_KEY")
+        self.minio_bucket: str = os.environ.get("MINIO_BUCKET", "presentations")
+        self.minio_use_https: bool = (
+            os.environ.get("MINIO_USE_HTTPS", "false").lower() == "true"
+        )
+        self.minio_region: str | None = os.environ.get("MINIO_REGION")
+        # Public base URL (e.g. https://minio.example.com/presentations) → return
+        # direct links; otherwise a presigned GET URL is generated.
+        self.minio_public_url: str | None = os.environ.get("MINIO_PUBLIC_URL")
+        self.minio_presigned_expiry_hours: int = int(
+            os.environ.get("MINIO_PRESIGNED_EXPIRY_HOURS", "168")
+        )
+        # Object-name prefix inside the bucket, e.g. "decks/".
+        self.minio_prefix: str = os.environ.get("MINIO_PREFIX", "")
+        self.minio_enabled: bool = bool(
+            self.minio_endpoint and self.minio_access_key and self.minio_secret_key
+        )
+
     def comfy_auth_headers(self) -> dict[str, str]:
         key = self.comfy_mcp_api_key or self.comfy_api_key
         if key:

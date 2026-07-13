@@ -127,18 +127,26 @@ async def create_presentation(plan: PresentationPlan) -> str:
         "slide_count": len(plan.slides),
         "theme": plan.theme,
     }
+
+    download = {
+        "filename": out_path.name,
+        "mime_type": (
+            "application/vnd.openxmlformats-officedocument."
+            "presentationml.presentation"
+        ),
+    }
+    if settings.minio_enabled:
+        try:
+            from . import storage
+
+            download["url"] = storage.upload_file(out_path)
+        except Exception as exc:  # noqa: BLE001
+            download["minio_error"] = str(exc)
     if settings.return_base64:
         import base64
 
-        data = base64.b64encode(out_path.read_bytes()).decode("ascii")
-        result["download"] = {
-            "filename": out_path.name,
-            "mime_type": (
-                "application/vnd.openxmlformats-officedocument."
-                "presentationml.presentation"
-            ),
-            "data": data,
-        }
+        download["data"] = base64.b64encode(out_path.read_bytes()).decode("ascii")
+    result["download"] = download
     return json.dumps(result)
 
 
