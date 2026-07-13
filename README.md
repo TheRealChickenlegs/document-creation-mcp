@@ -273,6 +273,7 @@ split on newlines, or a list).
   "title": "Deck title",
   "theme": "dark_tech",
   "output_filename": "my_deck",
+  "bucket": "presentations",
   "slides": [
     {"title": "Intro", "layout": "title", "subtitle": "An AI deck"},
     {"title": "Topic", "bullets": ["Point 1"], "image": {"prompt": "futuristic city"}},
@@ -282,3 +283,5 @@ split on newlines, or a list).
 ```
 
 Layouts: `title`, `title_and_content`, `two_column`, `image_full`, `section`.
+The optional `bucket` field sets the MinIO bucket for this deck (overrides
+`MINIO_BUCKET` env).

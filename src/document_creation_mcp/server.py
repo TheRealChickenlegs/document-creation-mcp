@@ -139,7 +139,7 @@ async def create_presentation(plan: PresentationPlan) -> str:
         try:
             from . import storage
 
-            download["url"] = storage.upload_file(out_path)
+            download["url"] = storage.upload_file(out_path, bucket_override=plan.bucket)
         except Exception as exc:  # noqa: BLE001
             download["minio_error"] = str(exc)
     if settings.return_base64:

@@ -24,17 +24,18 @@ def _client():
     )
 
 
-def upload_file(local_path: Path) -> str:
+def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
     """Upload a file to MinIO and return a retrievable URL.
 
-    Returns a public URL when MINIO_PUBLIC_URL is set, otherwise a presigned
-    GET URL valid for MINIO_PRESIGNED_EXPIRY_HOURS.
+    Uses the bucket from env (``MINIO_BUCKET``) or *bucket_override* when given.
+    Returns a public URL when ``MINIO_PUBLIC_URL`` is set, otherwise a presigned
+    GET URL valid for ``MINIO_PRESIGNED_EXPIRY_HOURS``.
     """
     from datetime import timedelta
 
     settings = get_settings()
     client = _client()
-    bucket = settings.minio_bucket
+    bucket = bucket_override or settings.minio_bucket
     object_name = f"{settings.minio_prefix}{Path(local_path).name}".replace("//", "/")
 
     try:

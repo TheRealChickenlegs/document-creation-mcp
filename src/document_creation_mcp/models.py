@@ -66,3 +66,5 @@ class PresentationPlan(BaseModel):
     slides: list[SlideSpec] = Field(default_factory=list)
     # Optional filename; ".pptx" is appended if missing.
     output_filename: str | None = None
+    # MinIO bucket to upload into (overrides MINIO_BUCKET env on a per-deck basis).
+    bucket: str | None = None
