@@ -14,7 +14,7 @@ any web research and composes the slide plan, then calls these tools.
 | `list_themes()` | List available design theme names. |
 | `get_theme(name)` | Return a theme's colors/fonts/image-style. |
 | `generate_image(prompt, theme, size, ...)` | Generate one image via ComfyUI MCP; returns local path. |
-| `create_presentation(plan_json)` | Build a deck from a `PresentationPlan` JSON; returns file path. |
+| `create_presentation(plan)` | Build a deck from a `PresentationPlan` object; returns file path. |
 | `list_comfy_models()` | List checkpoints/samplers/schedulers available on the ComfyUI HTTP API. |
 
 `create_presentation` will auto-generate any image that has an `image.prompt`
@@ -232,6 +232,10 @@ placeholders. Background images will also get a subtle dim/blur post-process so
 titles read clearly. See `comfy_workflows/presentation_sdxl.json`.
 
 ## Slide plan schema
+
+`create_presentation` takes the plan as a JSON **object** (not a string). Slide
+text is given as `bullets` (a list of strings) or `content` (a string, which is
+split on newlines, or a list).
 
 ```json
 {

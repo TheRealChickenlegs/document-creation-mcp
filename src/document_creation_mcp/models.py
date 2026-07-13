@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ImageSpec(BaseModel):
@@ -22,9 +22,13 @@ class ImageSpec(BaseModel):
 
 
 class SlideSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
     title: str
     subtitle: str | None = None
-    bullets: list[str] | None = None
+    # `content` is accepted as an alias for `bullets` (models often emit it).
+    # A string is split on newlines into bullet points.
+    bullets: list[str] | None = Field(default=None, alias="content")
     image: ImageSpec | None = None
     layout: Literal[
         "title",
@@ -33,6 +37,25 @@ class SlideSpec(BaseModel):
         "image_full",
         "section",
     ] = "title_and_content"
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def _coerce_bullets(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return [line.strip() for line in v.split("\n") if line.strip()]
+        if isinstance(v, list):
+            out: list[str] = []
+            for item in v:
+                if isinstance(item, str):
+                    out.extend(
+                        line.strip() for line in item.split("\n") if line.strip()
+                    )
+                else:
+                    out.append(str(item))
+            return out
+        return v
 
 
 class PresentationPlan(BaseModel):

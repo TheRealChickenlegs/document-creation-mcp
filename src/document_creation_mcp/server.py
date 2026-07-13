@@ -89,11 +89,11 @@ async def list_comfy_models() -> str:
 
 
 @mcp.tool()
-async def create_presentation(plan_json: str) -> str:
+async def create_presentation(plan: PresentationPlan) -> str:
     """Create a PowerPoint deck from a structured plan and return the file path.
 
     The orchestrating model is expected to do any web research and produce the
-    slide plan. `plan_json` is a JSON string matching PresentationPlan:
+    slide plan. Pass the plan as a JSON object matching PresentationPlan:
 
     {
       "title": "Deck title",
@@ -109,16 +109,17 @@ async def create_presentation(plan_json: str) -> str:
       ]
     }
 
-    Images declared with a `prompt` are auto-generated via ComfyUI. To reuse an
-    existing image, set `image.source` to a local path or URL instead.
+    Slide text may be provided as `bullets` or `content` (a string is split on
+    newlines; a list is accepted as-is). Images declared with a `prompt` are
+    auto-generated via ComfyUI. To reuse an existing image, set `image.source`
+    to a local path or URL instead.
     """
     settings = get_settings()
     try:
-        plan = PresentationPlan.model_validate(json.loads(plan_json))
-    except Exception as exc:  # noqa: BLE001
-        return json.dumps({"error": f"Invalid plan: {exc}"})
+        theme = get_theme_manager().get(plan.theme)
+    except KeyError as exc:
+        return json.dumps({"error": str(exc)})
 
-    theme = get_theme_manager().get(plan.theme)
     out_path = await build_presentation(plan, theme, settings.output_dir)
     return json.dumps(
         {
