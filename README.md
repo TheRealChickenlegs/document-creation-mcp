@@ -49,12 +49,11 @@ pip install -e .
 | **Direct API backend** (`IMAGE_BACKEND=comfy_api`) | | |
 | `COMFY_API_URL` | _(none)_ | Base URL of the ComfyUI instance, e.g. `http://comfyui:8188`. |
 | `COMFY_API_KEY` | _(none)_ | Optional bearer token for the ComfyUI endpoint. |
-| `COMFY_API_WORKFLOW` | _(built-in)_ | Path to a JSON workflow template using `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, `{{seed}}`, `{{checkpoint}}`, `{{steps}}`, `{{cfg}}`, `{{sampler}}`, `{{scheduler}}`. |
-| `COMFY_API_CHECKPOINT` | `sd_xl_base_1.0.safetensors` | Checkpoint loaded by the default workflow. |
+| `COMFY_API_CHECKPOINT` | _(auto)_ | Checkpoint to load. When unset, auto-selected from installed checkpoints (SDXL-style preferred). |
 | `COMFY_API_STEPS` / `COMFY_API_CFG` | `25` / `7.0` | KSampler steps / CFG scale. |
-| `COMFY_API_SAMPLER` / `COMFY_API_SCHEDULER` | `euler` / `normal` | KSampler sampler / scheduler. |
+| `COMFY_API_SAMPLER` / `COMFY_API_SCHEDULER` | `euler` / `normal` | KSampler sampler / scheduler (auto-matched to installed values). |
 | `COMFY_API_SEED` | `0` | Seed (`0` = random per request). |
-| `COMFY_API_AUTODISCOVER` | `true` | When enabled, the `comfy_api` backend queries `/object_info` and auto-selects an installed checkpoint (preferring SDXL-style names) plus a valid sampler/scheduler, so no manual model config is needed. |
+| `COMFY_API_AUTODISCOVER` | `true` | When enabled (default), the `comfy_api` backend queries `/object_info` and auto-detects **every** installed model — checkpoints, VAE, LoRA, ControlNet, IP-Adapter, CLIP-Vision and upscalers — then builds a consistency pipeline (IP-Adapter style lock + ControlNet composition + upscale) using only what is present. No workflow JSON is required. |
 | `COMFY_MCP_TIMEOUT` | `300` | Seconds to wait for image generation (both backends). |
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 | `DOC_MCP_RETURN_BASE64` | `true` | When `true`, `create_presentation` includes the `.pptx` as base64 (`download` field) in its result so it is retrievable through the chat client without host access. Set `false` to return only the path (e.g. when the output dir is a mounted volume you read directly). |
@@ -189,78 +188,71 @@ bundled ones, so a file with the same `name` overrides a factory theme.
 To refresh after editing theme files, the server reloads them on startup; there
 is also a `list_themes()` tool to confirm what is loaded.
 
-## Recommended ComfyUI model stack for consistent decks
+## Automatic, consistent image generation (no workflow files)
 
-To get cohesive, on-brand imagery across an entire deck (not just one-off
-pictures), run an **SDXL** base with **IP-Adapter** for style/subject consistency
-and **ControlNet** for composition control, then **upscale** for projector-grade
-output. The pipeline below is what `IMAGE_BACKEND=comfy_api` is designed to drive
-(see `comfy_workflows/presentation_sdxl.json` for a ready-to-adapt template).
+`IMAGE_BACKEND=comfy_api` drives ComfyUI **directly** and needs **no workflow
+JSON**. On first generation it queries the instance's `/object_info` to discover
+**every** installed model — checkpoints, VAE, LoRA, ControlNet, IP-Adapter,
+CLIP-Vision and upscalers — then assembles a consistency pipeline in code using
+only what is present:
 
-### What to install
+```
+Checkpoint ─► [IP-Adapter] ─► [ControlNet] ─► KSampler ─► VAEDecode
+                                                    │
+                                           [Upscale] ─► SaveImage
+```
 
-| Purpose | Suggested model(s) | Notes |
-|---------|--------------------|-------|
-| **Base checkpoint** | `juggernautXL_v9Rundiffusion.safetensors` (general), or `RealVisXL` (photoreal/corporate), or `DreamShaper XL` (stylised) | Pick **one** per deck; set it as `COMFY_API_CHECKPOINT`. |
-| **VAE** | `sdxl_vae.safetensors` | Usually bundled with the checkpoint. |
-| **CLIP Vision** (IP-Adapter dependency) | `CLIP-ViT-H-14-laion2b-s32B-b79K.safetensors` | Required by IP-Adapter. |
-| **IP-Adapter** | `ip-adapter-plus_sdxl_vit-h.safetensors` (style+composition) and/or `ip-adapter-plus-face_sdxl_vit-h.safetensors` (face/character lock) | Drives consistency from a single **style reference image**. |
-| **ControlNet** | `controlnet-union-sdxl-1.0.safetensors` (all-in-one: depth/canny/pose/tile) | One file covers every composition mode. |
-| **Upscaler** | `4x-UltraSharp.pth` (or `4x_NMKD-Siax_200k.pth`) | ESRGAN; sharpens the final 16:9 output. |
-| **(Optional) Style LoRA** | any brand/style LoRA | Extra brand lock on top of IP-Adapter. |
-| **Custom nodes** | `ComfyUI_IPAdapter_plus`, `ComfyUI_ControlNet_Union` (or `ComfyUI-Advanced-ControlNet`) | Provide the `IPAdapter` / `ControlNetApplyAdvanced` nodes used by the template. |
+Bracketed nodes are inserted conditionally, so a bare text-to-image graph is
+used when only a checkpoint is available, and the full IP-Adapter + ControlNet +
+upscale pipeline kicks in automatically as more models are installed. There is
+nothing to configure by hand.
 
-> The exact node class names/inputs vary slightly between custom-node versions.
-> Treat `comfy_workflows/presentation_sdxl.json` as a **reference** to adapt to
-> your installed node pack, then point `COMFY_API_WORKFLOW` at it.
+### What to install (more = more consistent)
 
-### How consistency is enforced (the strategy)
+| Purpose | Suggested model(s) | Effect when present |
+|---------|--------------------|---------------------|
+| **Base checkpoint** | `juggernautXL_v9Rundiffusion.safetensors` (general), `RealVisXL` (photoreal/corporate), `DreamShaper XL` (stylised) | Auto-selected (SDXL-style preferred). |
+| **VAE** | `sdxl_vae.safetensors` | Auto-loaded if found. |
+| **CLIP Vision** | `CLIP-ViT-H-14-laion2b-s32B-b79K.safetensors` | Enables IP-Adapter. |
+| **IP-Adapter** | `ip-adapter-plus_sdxl_vit-h.safetensors` | Locks every slide to one deck-wide style. |
+| **ControlNet** | `controlnet-union-sdxl-1.0.safetensors` | Keeps subjects off-centre so text stays readable. |
+| **Upscaler** | `4x-UltraSharp.pth` / `4x_NMKD-Siax_200k.pth` | Sharper projector-grade output. |
+| **Custom nodes** | `ComfyUI_IPAdapter_plus`, `ComfyUI_ControlNet_Union` | Provide the IP-Adapter / ControlNet nodes. |
 
-1. **One style reference image per theme.** Store a reference image in the theme
-   (e.g. `style_reference_image`) and feed it to IP-Adapter at a moderate weight
-   (~0.6–0.8). Every slide image in that deck inherits the same look/colour
-   mood — this is the single biggest lever for cohesion.
-2. **Shared negative prompt + colour palette.** Bake a deck-wide negative
-   (`watermark, text, blurry, low quality, jpeg artifacts`) and append the
-   theme's `image_style` to every prompt (already done by `generate_image`).
-3. **Composition control with ControlNet.** Use a "subject-off-centre" control
-   image (or Union `type: depth/canny`) so subjects sit left/right, leaving
-   negative space for titles and bullet text — especially for `image_full`
-   backgrounds.
-4. **Fixed resolutions per role.** Backgrounds: **16:9 → 1344×768** (or
-   1536×864). Content/side images: **1:1 → 1024×1024** or **4:3 → 1152×896**.
-   All divisible by 8 for SDXL.
-5. **Upscale once at the end** for crisp projection.
-6. **(Optional) per-deck seed base.** Generate with a fixed base seed + per-slide
-   offset for reproducible backgrounds while keeping variety.
+### How consistency is enforced
 
-### Planned integration (not yet wired)
+1. **Auto style reference.** If a theme sets `style_reference_image` it is used;
+   otherwise the backend generates one anchor image per deck from the theme's
+   `image_style` and feeds it to IP-Adapter, so all slides share a look with no
+   supplied asset.
+2. **Per-role presets** (`ImageSpec.target`):
+   - `background` → stronger ControlNet + auto dim/blur post-process for legibility.
+   - `content` → balanced style + composition lock.
+   - `icon` → lighter composition control, placed as a small top-right asset.
+3. **Shared negative prompt + palette.** The deck/theme `negative_prompt` and the
+   theme `image_style` suffix are applied to every prompt.
+4. **Graceful degradation.** Missing ControlNet / IP-Adapter / upscaler → that
+   stage is skipped; the graph always submits successfully.
 
-Once the models above are installed locally, the call path will be extended to
-use them automatically via theme options, e.g.:
+### Optional theme tuning
 
 ```yaml
 name: dark_tech
-# ...existing colors/fonts...
 image_style: "cinematic, neon accents, dark moody background, 8k, highly detailed"
-style_reference_image: "themes/refs/dark_tech_style.png"  # fed to IP-Adapter
+style_reference_image: "themes/refs/dark_tech_style.png"  # optional; auto-generated if omitted
 ip_adapter_weight: 0.7
 controlnet:
   enabled: true
   type: depth          # depth | canny | openpose | tile
   strength: 0.6
   reference_image: "themes/refs/dark_tech_comp.png"
-upscale_model: "4x-UltraSharp.pth"
+upscale_model: "4x-UltraSharp.pth"   # optional; auto-selected if omitted
 negative_prompt: "watermark, text, blurry, low quality, jpeg artifacts"
 background_post: "dim"   # light blur + dark overlay so text stays readable
 ```
 
-The `comfy_api` backend will then load `COMFY_API_WORKFLOW` (the IP-Adapter +
-ControlNet + upscale graph) and substitute `{{style_image}}`, `{{ip_weight}}`,
-`{{control_image}}`, `{{control_strength}}`, `{{upscale_model}}` from the theme,
-alongside the existing `{{prompt}}` / `{{width}}` / `{{height}}` / `{{seed}}`
-placeholders. Background images will also get a subtle dim/blur post-process so
-titles read clearly. See `comfy_workflows/presentation_sdxl.json`.
+Set `COMFY_API_AUTODISCOVER=false` only if you want to pin specific model names
+via the `COMFY_API_*` env vars instead of auto-detection.
 
 ## Slide plan schema
 

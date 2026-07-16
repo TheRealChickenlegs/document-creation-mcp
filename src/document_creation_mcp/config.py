@@ -52,8 +52,6 @@ class Settings:
         # Base URL of the ComfyUI instance, e.g. "http://comfyui:8188".
         self.comfy_api_url: str | None = os.environ.get("COMFY_API_URL")
         self.comfy_api_key: str | None = os.environ.get("COMFY_API_KEY")
-        # Optional path to a JSON workflow template using {{placeholders}}.
-        self.comfy_api_workflow: str | None = os.environ.get("COMFY_API_WORKFLOW")
         self.comfy_api_checkpoint: str = os.environ.get(
             "COMFY_API_CHECKPOINT", "sd_xl_base_1.0.safetensors"
         )

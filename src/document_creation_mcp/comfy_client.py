@@ -32,6 +32,7 @@ async def generate_image(
     size: str = "1024x1024",
     tool_name: str | None = None,
     theme=None,
+    target: str = "content",
 ) -> str:
     """Generate an image and return a local file path.
 
@@ -41,7 +42,8 @@ async def generate_image(
 
     When `theme` (a Theme) is supplied, its `negative_prompt` is merged in and,
     for the `comfy_api` backend, its style-reference / ControlNet / upscale
-    settings drive the consistency pipeline.
+    settings drive the consistency pipeline. ``target`` (content / background /
+    icon) selects the per-role consistency preset for the comfy_api backend.
     """
     settings = get_settings()
     if settings.disable_images:
@@ -52,6 +54,9 @@ async def generate_image(
     effective_neg = "; ".join(parts) or None
 
     width, height = _parse_size(size)
+    if theme is not None:
+        # Thread the role to the comfy_api builder (read in generate_image_via_api).
+        theme._current_target = target
     if settings.image_backend == "comfy_api":
         return await generate_image_via_api(prompt, effective_neg, width, height, theme)
     return await generate_image_via_mcp(prompt, effective_neg, width, height, tool_name)
@@ -117,121 +122,177 @@ async def generate_image_via_mcp(
 # --------------------------------------------------------------------------- #
 
 
-def _default_workflow() -> dict:
-    """A minimal text-to-image graph (SD1.5 / SDXL) using {{placeholders}}."""
-    return {
-        "1": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": "{{checkpoint}}"},
-        },
-        "2": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "{{prompt}}", "clip": ["1", 0]},
-        },
-        "3": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": "{{negative_prompt}}", "clip": ["1", 0]},
-        },
-        "4": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": "{{seed}}",
-                "steps": "{{steps}}",
-                "cfg": "{{cfg}}",
-                "sampler_name": "{{sampler}}",
-                "scheduler": "{{scheduler}}",
-                "denoise": 1.0,
-                "model": ["1", 0],
-                "positive": ["2", 0],
-                "negative": ["3", 0],
-                "latent_image": ["5", 0],
-            },
-        },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {"width": "{{width}}", "height": "{{height}}", "batch_size": 1},
-        },
-        "6": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["4", 0], "vae": ["1", 0]},
-        },
-        "7": {
-            "class_type": "SaveImage",
-            "inputs": {"images": ["6", 0]},
-        },
-    }
+# --------------------------------------------------------------------------- #
+# In-code workflow construction (no hand-written template required)
+# --------------------------------------------------------------------------- #
+#
+# The pipeline is assembled dynamically from what the ComfyUI instance actually
+# has installed, so decks get consistency (IP-Adapter style lock + ControlNet
+# composition + upscale) automatically, with graceful degradation whenever a
+# capability is missing.
+#
+#   Checkpoint ─► [IP-Adapter] ─► [ControlNet] ─► KSampler ─► VAEDecode
+#                                                       │
+#                                              [Upscale] ─► SaveImage
+#
+# Brackets denote optional nodes that are only inserted when the corresponding
+# model is discovered. Every step that cannot run is simply skipped, so the
+# graph always submits successfully.
+
+# Candidate substrings used to auto-select the "best" model of each kind.
+_IPADAPTER_CANDIDATES = ["ip-adapter-plus_sdxl", "ip-adapter-plus-face_sdxl", "ip-adapter_sdxl", "ipadapter"]
+_CONTROLNET_CANDIDATES = ["controlnet-union-sdxl", "controlnet-union", "controlnet"]
+_UPSCALE_CANDIDATES = ["4x-ultrasharp", "4x_nmkd", "4x", "esrgan", "upscale"]
+_CLIPVISION_CANDIDATES = ["clip-vit-h", "clip-vit-big-g", "clip-vision"]
 
 
-def _coerce(value):
-    if isinstance(value, bool):
-        return value
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        pass
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return value
-
-
-def _substitute(obj, mapping: dict):
-    if isinstance(obj, dict):
-        return {k: _substitute(v, mapping) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_substitute(v, mapping) for v in obj]
-    if isinstance(obj, str) and obj in mapping:
-        return _coerce(mapping[obj])
-    return obj
-
-
-def _build_workflow(
-    raw: dict,
+def build_consistency_workflow(
+    *,
     prompt: str,
     negative: str,
     width: int,
     height: int,
-    *,
     checkpoint: str,
     steps: int,
     cfg: float,
     sampler: str,
     scheduler: str,
     seed: int,
+    models: dict[str, list[str]],
     style_image: str = "",
     ip_weight: float = 0.7,
     control_image: str = "",
     control_strength: float = 0.0,
     control_type: str = "depth",
     upscale_model: str = "",
+    vae: str = "",
+    target: str = "content",
 ) -> dict:
-    mapping = {
-        "{{prompt}}": prompt,
-        "{{negative_prompt}}": negative or "",
-        "{{width}}": width,
-        "{{height}}": height,
-        "{{seed}}": seed,
-        "{{checkpoint}}": checkpoint,
-        "{{steps}}": steps,
-        "{{cfg}}": cfg,
-        "{{sampler}}": sampler,
-        "{{scheduler}}": scheduler,
-        "{{style_image}}": style_image,
-        "{{ip_weight}}": ip_weight,
-        "{{control_image}}": control_image,
-        "{{control_strength}}": control_strength,
-        "{{control_type}}": control_type,
-        "{{upscale_model}}": upscale_model,
-    }
-    return _substitute(raw, mapping)
+    """Construct a ComfyUI API workflow graph from discovered models.
+
+    Nodes are added conditionally based on what ``models`` reports as installed,
+    so the same function drives a bare text-to-image graph or a full
+    IP-Adapter + ControlNet + upscale pipeline. Returns the API-format dict.
+    """
+    ip_model = _pick_from_list(models.get("ipadapters", []), _IPADAPTER_CANDIDATES)
+    cn_model = _pick_from_list(models.get("controlnets", []), _CONTROLNET_CANDIDATES)
+    up_model = upscale_model or _pick_from_list(
+        models.get("upscalers", []), _UPSCALE_CANDIDATES
+    )
+    clip_model = _pick_from_list(models.get("clip_vision", []), _CLIPVISION_CANDIDATES)
+
+    use_ip = bool(ip_model and style_image and clip_model)
+    use_cn = bool(cn_model and control_image)
+    use_upscale = bool(up_model)
+
+    g: dict[str, dict] = {}
+    n = 0
+
+    def add(class_type: str, **inputs):
+        nonlocal n
+        n += 1
+        g[str(n)] = {"class_type": class_type, "inputs": inputs}
+        return str(n)
+
+    ckpt = add("CheckpointLoaderSimple", ckpt_name=checkpoint)
+    pos = add("CLIPTextEncode", text=prompt, clip=[ckpt, 0])
+    neg = add("CLIPTextEncode", text=negative, clip=[ckpt, 0])
+
+    model_out = [ckpt, 0]
+
+    # --- IP-Adapter: lock the deck-wide style from a reference image ---
+    if use_ip:
+        clipvision = add("CLIPVisionLoader", clip_name=clip_model)
+        ip = add("IPAdapterModelLoader", model_name=ip_model)
+        ip_applied = add(
+            "IPAdapter",
+            model=[ckpt, 0],
+            ipadapter=[ip, 0],
+            image=add("LoadImage", image=style_image),
+            clip_vision=[clipvision, 0],
+            weight=float(ip_weight),
+            noise=0.0,
+            weight_type="style transfer (medium)",
+            start_at=0.0,
+            end_at=1.0,
+            unfold_batch=False,
+            embeds_scaling="V only",
+        )
+        model_out = [ip_applied, 0]
+
+    # --- ControlNet: steer composition (off-centre subject for text space) ---
+    if use_cn:
+        cn = add("ControlNetLoader", ckpt_name=cn_model)
+        cn_applied = add(
+            "ControlNetApplyAdvanced",
+            positive=[pos, 0],
+            negative=[neg, 0],
+            control_net=[cn, 0],
+            image=add("LoadImage", image=control_image),
+            strength=float(control_strength),
+            start_percent=0.0,
+            end_percent=1.0,
+            type=control_type,
+        )
+        pos, neg = [cn_applied, 0], [cn_applied, 1]
+
+    vae_out = [ckpt, 1] if not vae else [add("VAELoader", vae_name=vae), 0]
+
+    latent = add(
+        "EmptyLatentImage", width=int(width), height=int(height), batch_size=1
+    )
+    sampler = add(
+        "KSampler",
+        seed=int(seed),
+        steps=int(steps),
+        cfg=float(cfg),
+        sampler_name=sampler,
+        scheduler=scheduler,
+        denoise=1.0,
+        model=model_out,
+        positive=pos,
+        negative=neg,
+        latent_image=[latent, 0],
+    )
+    decoded = add("VAEDecode", samples=[sampler, 0], vae=vae_out)
+
+    if use_upscale:
+        up = add("UpscaleModelLoader", model_name=up_model)
+        upscaled = add(
+            "ImageUpscaleWithModel", upscale_model=[up, 0], image=[decoded, 0]
+        )
+        add("SaveImage", images=[upscaled, 0])
+    else:
+        add("SaveImage", images=[decoded, 0])
+
+    return g
 
 
 # Auto-discovery of available models so the backend works with zero config.
 _DISCOVERY_CACHE: dict | None = None
 
+# (node class, input key) pairs we probe to learn what a ComfyUI instance has
+# installed. Each maps to a capability the consistency pipeline can use.
+_DISCOVERY_NODES: dict[str, tuple[str, str]] = {
+    "checkpoints": ("CheckpointLoaderSimple", "ckpt_name"),
+    "vae": ("VAELoader", "vae_name"),
+    "loras": ("LoraLoader", "lora_name"),
+    "controlnets": ("ControlNetLoader", "ckpt_name"),
+    "ipadapters": ("IPAdapterModelLoader", "model_name"),
+    "upscalers": ("UpscaleModelLoader", "model_name"),
+    "clip_vision": ("CLIPVisionLoader", "clip_name"),
+    "samplers": ("KSampler", "sampler_name"),
+    "schedulers": ("KSampler", "scheduler"),
+}
+
 
 async def discover_comfy_models(force: bool = False) -> dict:
-    """Query the ComfyUI API for installed checkpoints, samplers and schedulers.
+    """Query the ComfyUI API for every model type it can load.
+
+    Returns a dict of capability -> list of installed model names, e.g.
+    ``{"checkpoints": [...], "controlnets": [...], "ipadapters": [...], ...}``.
+    This lets the backend build a consistency pipeline from whatever the
+    instance actually has, with no hand-written workflow JSON required.
 
     Results are cached for the process lifetime. Pass ``force=True`` to bypass
     the cache (e.g. after installing new models on the ComfyUI server).
@@ -258,11 +319,7 @@ async def discover_comfy_models(force: bool = False) -> dict:
         vals = entry[0] if isinstance(entry, list) and entry and isinstance(entry[0], list) else []
         return [str(v) for v in vals]
 
-    models = {
-        "checkpoints": _options("CheckpointLoaderSimple", "ckpt_name"),
-        "samplers": _options("KSampler", "sampler_name"),
-        "schedulers": _options("KSampler", "scheduler"),
-    }
+    models = {cap: _options(node, key) for cap, (node, key) in _DISCOVERY_NODES.items()}
     _DISCOVERY_CACHE = models
     return models
 
@@ -277,6 +334,23 @@ def _pick_checkpoint(discovered: list[str], configured: str) -> str:
         if "xl" in name.lower():
             return name
     return discovered[0]
+
+
+def _pick_from_list(discovered: list[str], candidates: list[str], configured: str | None = None) -> str:
+    """Pick the first discovered model matching a candidate (case-insensitive substring).
+
+    Falls back to ``configured`` if it is present in the discovered list, then to
+    the first discovered model, then to "" (caller decides whether to skip).
+    """
+    pool = discovered or []
+    if configured and configured in pool:
+        return configured
+    lowered = [c.lower() for c in candidates]
+    for name in pool:
+        low = name.lower()
+        if any(c in low for c in lowered):
+            return name
+    return pool[0] if pool else ""
 
 
 def _coerce_to_known(value: str, discovered: list[str], fallback: str) -> str:
@@ -299,56 +373,76 @@ async def generate_image_via_api(
     base = settings.comfy_api_url.rstrip("/")
     headers = settings.comfy_auth_headers()
 
+    # --- Per-target consistency presets -------------------------------------
+    # `target` is threaded through from ImageSpec (content / background / icon).
+    target = getattr(theme, "_current_target", None) or "content"
     # --- Consistency values from the theme (IP-Adapter / ControlNet / upscale) ---
-    style_image = getattr(theme, "style_reference_image", None) or ""
     ip_weight = getattr(theme, "ip_adapter_weight", 0.7) or 0.7
     cn = getattr(theme, "controlnet", None)
-    control_enabled = bool(cn and getattr(cn, "enabled", False))
-    control_image = (getattr(cn, "reference_image", None) if cn else None) or style_image
-    control_strength = getattr(cn, "strength", 0.6) if control_enabled else 0.0
     control_type = getattr(cn, "type", "depth") or "depth"
-    upscale_model = getattr(theme, "upscale_model", None) or "4x-UltraSharp.pth"
+    # Defaults tuned per role; a theme may override strength/type via `controlnet`.
+    control_strength = {
+        "background": 0.6,
+        "icon": 0.35,
+        "content": 0.5,
+    }.get(target, 0.5)
+    if cn and getattr(cn, "enabled", False):
+        control_strength = getattr(cn, "strength", control_strength)
+        control_type = getattr(cn, "type", control_type) or control_type
 
-    # Use the user's advanced workflow template only when it can actually run:
-    # it requires a style-reference image for the IP-Adapter LoadImage node.
-    use_advanced = bool(settings.comfy_api_workflow and style_image)
-    if use_advanced:
-        raw = json.loads(Path(settings.comfy_api_workflow).read_text(encoding="utf-8"))
-    else:
-        raw = _default_workflow()
+    upscale_model = getattr(theme, "upscale_model", None) or ""
 
-    checkpoint = settings.comfy_api_checkpoint
-    sampler = settings.comfy_api_sampler
-    scheduler = settings.comfy_api_scheduler
+    # --- Discover everything the instance has, then auto-wire the pipeline --
     if settings.comfy_api_autodiscover:
         models = await discover_comfy_models()
-        checkpoint = _pick_checkpoint(models["checkpoints"], checkpoint)
-        sampler = _coerce_to_known(sampler, models["samplers"], sampler)
-        scheduler = _coerce_to_known(scheduler, models["schedulers"], scheduler)
-        if not checkpoint:
-            raise ComfyClientError(
-                "No checkpoints found on the ComfyUI server and COMFY_API_CHECKPOINT is unset."
-            )
+    else:
+        models = {
+            "checkpoints": [settings.comfy_api_checkpoint] if settings.comfy_api_checkpoint else [],
+            "samplers": [settings.comfy_api_sampler],
+            "schedulers": [settings.comfy_api_scheduler],
+        }
+    checkpoint = _pick_checkpoint(models.get("checkpoints", []), settings.comfy_api_checkpoint)
+    sampler = _coerce_to_known(settings.comfy_api_sampler, models.get("samplers", []), settings.comfy_api_sampler)
+    scheduler = _coerce_to_known(settings.comfy_api_scheduler, models.get("schedulers", []), settings.comfy_api_scheduler)
+    vae = _pick_from_list(models.get("vae", []), ["sdxl_vae", "vae"])
+    if not checkpoint:
+        raise ComfyClientError(
+            "No checkpoints found on the ComfyUI server and COMFY_API_CHECKPOINT is unset."
+        )
+
+    # --- Auto style reference (IP-Adapter): use the theme's image if provided,
+    # otherwise generate one anchor image per deck so every slide shares a look.
+    style_image = _resolve_style_reference(theme, target)
+    if not style_image and models.get("ipadapters"):
+        style_image = await _ensure_anchor_image(
+            base, headers, settings, models, checkpoint, sampler, scheduler, theme, width, height
+        )
+
+    # --- ControlNet composition reference: reuse the style image (or theme
+    # controlnet.reference_image) so subjects sit off-centre for text space.
+    control_image = (getattr(cn, "reference_image", None) if cn else None) or style_image
 
     seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
-    workflow = _build_workflow(
-        raw,
-        prompt,
-        negative_prompt,
-        width,
-        height,
+    workflow = build_consistency_workflow(
+        prompt=prompt,
+        negative=negative_prompt or "",
+        width=width,
+        height=height,
         checkpoint=checkpoint,
         steps=settings.comfy_api_steps,
         cfg=settings.comfy_api_cfg,
         sampler=sampler,
         scheduler=scheduler,
         seed=seed,
+        models=models,
         style_image=style_image,
         ip_weight=ip_weight,
         control_image=control_image,
         control_strength=control_strength,
         control_type=control_type,
         upscale_model=upscale_model,
+        vae=vae,
+        target=target,
     )
     client_id = uuid.uuid4().hex
 
@@ -374,6 +468,66 @@ async def generate_image_via_api(
         out_path = settings.image_cache_dir / f"img_{prompt_id}.png"
         out_path.write_bytes(view.content)
         return str(out_path)
+
+
+# Cache one anchor (style-reference) image per deck so all slides share it.
+_ANCHOR_CACHE: dict[str, str] = {}
+
+
+def _resolve_style_reference(theme, target: str) -> str:
+    """Return a style-reference image path/URL if explicitly set on the theme."""
+    return getattr(theme, "style_reference_image", None) or ""
+
+
+async def _ensure_anchor_image(
+    base: str, headers, settings, models, checkpoint, sampler, scheduler, theme, width, height
+) -> str:
+    """Generate (and cache) a single anchor image to drive IP-Adapter consistency.
+
+    Produces one cohesive reference per deck from the theme's ``image_style`` so
+    every subsequent slide image inherits the same palette/mood — no workflow
+    JSON or pre-supplied asset required.
+    """
+    cache_key = f"{getattr(theme, 'name', '')}:{theme.image_style}"
+    if cache_key in _ANCHOR_CACHE:
+        return _ANCHOR_CACHE[cache_key]
+
+    anchor_prompt = f"abstract cohesive brand texture, {theme.image_style}".strip(", ")
+    # Build a minimal (no-IPA) graph for the anchor so we don't recurse.
+    wf = build_consistency_workflow(
+        prompt=anchor_prompt,
+        negative="text, watermark, blurry, low quality",
+        width=min(width, 1024),
+        height=min(height, 1024),
+        checkpoint=checkpoint,
+        steps=settings.comfy_api_steps,
+        cfg=settings.comfy_api_cfg,
+        sampler=sampler,
+        scheduler=scheduler,
+        seed=random.randint(0, 2**32 - 1),
+        models=models,
+        style_image="",
+        control_image="",
+    )
+    client_id = uuid.uuid4().hex
+    async with httpx.AsyncClient(timeout=settings.comfy_timeout) as client:
+        resp = await client.post(
+            f"{base}/prompt", json={"prompt": wf, "client_id": client_id}, headers=headers or None
+        )
+        resp.raise_for_status()
+        pid = resp.json().get("prompt_id")
+        if not pid:
+            return ""
+        outputs = await _wait_for_completion(client, base, pid, headers)
+        meta = _find_image(outputs)
+        if not meta:
+            return ""
+        view = await client.get(f"{base}/view", params=meta, headers=headers or None)
+        view.raise_for_status()
+        out = settings.image_cache_dir / f"anchor_{uuid.uuid4().hex}.png"
+        out.write_bytes(view.content)
+        _ANCHOR_CACHE[cache_key] = str(out)
+        return str(out)
 
 
 async def _wait_for_completion(client, base: str, prompt_id: str, headers) -> dict:

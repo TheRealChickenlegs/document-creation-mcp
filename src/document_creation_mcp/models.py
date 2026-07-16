@@ -15,8 +15,8 @@ class ImageSpec(BaseModel):
     size: str = "1024x1024"
     # Negative prompt passed through to ComfyUI when generating.
     negative_prompt: str | None = None
-    # Where the image lives on the slide.
-    target: Literal["content", "background"] = "content"
+    # Where the image lives on the slide. "icon" produces a small, simple asset.
+    target: Literal["content", "background", "icon"] = "content"
     # Optional explicit path/URL. If set, no generation happens and this is used directly.
     source: str | None = None
 

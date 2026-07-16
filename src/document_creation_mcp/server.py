@@ -64,7 +64,7 @@ async def generate_image(
         theme: Theme whose `image_style` is appended for consistency.
         size: Output size, e.g. "1024x1024".
         negative_prompt: Optional negative prompt.
-        target: "content" or "background".
+        target: "content", "background", or "icon".
         use_theme_style: When true (default), the theme's `image_style` is
             appended to the prompt for visual consistency.
     """
@@ -79,17 +79,19 @@ async def generate_image(
         negative_prompt=negative_prompt,
         size=size,
         theme=theme_obj,
+        target=target,
     )
 
 
 @mcp.tool()
 async def list_comfy_models(force: bool = False) -> str:
-    """List models available on the ComfyUI HTTP API (checkpoints/samplers/schedulers).
+    """List every model the ComfyUI HTTP API exposes (checkpoints, VAE, LoRA,
+    ControlNet, IP-Adapter, CLIP-Vision, upscalers, samplers, schedulers).
 
-    Useful to see what the direct `comfy_api` backend can use, and to pick a
-    value for COMFY_API_CHECKPOINT. Requires IMAGE_BACKEND=comfy_api and
-    COMFY_API_URL to be set. Set ``force=True`` to bypass the in-memory cache
-    (e.g. after installing new models on the ComfyUI server).
+    Useful to confirm what the `comfy_api` backend will auto-wire for the
+    consistency pipeline. Requires IMAGE_BACKEND=comfy_api and COMFY_API_URL to
+    be set. Set ``force=True`` to bypass the in-memory cache (e.g. after
+    installing new models on the ComfyUI server).
     """
     from . import comfy_client
 

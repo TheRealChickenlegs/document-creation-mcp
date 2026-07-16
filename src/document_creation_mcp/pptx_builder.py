@@ -84,6 +84,12 @@ def _place_image(slide, path: str, left: Emu, top: Emu, width: Emu, height: Emu)
     slide.shapes.add_picture(path, left, top, iw, ih)
 
 
+def _place_icon(slide, path: str) -> None:
+    """Place a small icon in the top-right corner (leaves text space)."""
+    size = Inches(1.1)
+    _place_image(slide, path, SLIDE_W - MARGIN - size, MARGIN, size, size)
+
+
 def _add_logo(slide, theme: Theme) -> None:
     logo = theme.logo
     if not logo:
@@ -118,6 +124,7 @@ async def _resolve_image(slide: SlideSpec, theme: Theme) -> str | None:
             negative_prompt=img.negative_prompt,
             size=img.size,
             theme=theme,
+            target=img.target,
         )
 
     # Post-process backgrounds/full-bleed images so overlaid text stays readable.
@@ -181,7 +188,14 @@ def _layout_title_content(slide, spec: SlideSpec, theme: Theme) -> None:
 
     content_top = Inches(2.0)
     if spec.bullets:
-        if spec.image and spec.image.target == "content":
+        if spec.image and spec.image.target == "icon":
+            # Icon sits top-right; bullets take the full content width.
+            img_path = getattr(slide, "_resolved_image", None)
+            if img_path:
+                _place_icon(slide, img_path)
+            _fill_bullets_text(slide, spec, theme, MARGIN, content_top,
+                               SLIDE_W - 2 * MARGIN, SLIDE_H - content_top - MARGIN)
+        elif spec.image and spec.image.target == "content":
             # Two-column: text left, image right.
             col_w = (SLIDE_W - 3 * MARGIN) // 2
             _fill_bullets_text(slide, spec, theme, MARGIN, content_top, col_w,
@@ -218,8 +232,11 @@ def _layout_two_column(slide, spec: SlideSpec, theme: Theme) -> None:
                            SLIDE_H - top - MARGIN)
     img_path = getattr(slide, "_resolved_image", None)
     if img_path:
-        _place_image(slide, img_path, MARGIN * 2 + col_w, top, col_w,
-                     SLIDE_H - top - MARGIN)
+        if spec.image and spec.image.target == "icon":
+            _place_icon(slide, img_path)
+        else:
+            _place_image(slide, img_path, MARGIN * 2 + col_w, top, col_w,
+                         SLIDE_H - top - MARGIN)
 
 
 def _layout_image_full(slide, spec: SlideSpec, theme: Theme) -> None:

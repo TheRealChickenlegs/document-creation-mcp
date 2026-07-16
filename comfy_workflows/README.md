@@ -1,47 +1,37 @@
-# Reference ComfyUI workflow for consistent decks
+# ComfyUI integration (built in code — no workflow files)
 
-`presentation_sdxl.json` is a **reference** API-format workflow for the
-`comfy_api` backend. It wires the recommended consistency pipeline:
+This directory previously held a hand-written workflow JSON
+(`presentation_sdxl.json`). That template has been **removed**: the
+`comfy_api` backend now **constructs the ComfyUI API graph in code**
+(`comfy_client.build_consistency_workflow`) from whatever models the
+instance reports via `/object_info`.
 
-```
-Checkpoint ─► IP-Adapter (style reference) ─► ControlNet (composition)
-                                                │
-KSampler ◄──────────────────────────────────────┘
-   │
-VAEDecode ─► Upscale ─► SaveImage
-```
+## Why there is no template anymore
 
-## Placeholders
+A static JSON pins specific model filenames (`ip-adapter-plus_sdxl_vit-h…`,
+`controlnet-union-sdxl-1.0…`, `4x-UltraSharp.pth`) and a fixed node graph. If
+your install used different names — or lacked a stage entirely — submission
+failed or silently dropped consistency. Building the graph in code instead
+means:
 
-The backend substitutes these (exact-match string values are coerced to the
-right type by `comfy_client._substitute`):
+- **Auto-discovery** of every loader type: `CheckpointLoaderSimple`,
+  `VAELoader`, `LoraLoader`, `ControlNetLoader`, `IPAdapterModelLoader`,
+  `UpscaleModelLoader`, `CLIPVisionLoader`, plus `KSampler` samplers/schedulers.
+- **Conditional nodes** — IP-Adapter, ControlNet and Upscale are only inserted
+  when their models are discovered, so the same code drives a bare T2I graph or
+  a full style+composition+upscale pipeline.
+- **Auto style reference** — if the theme sets no `style_reference_image`, one
+  anchor image is generated per deck and fed to IP-Adapter, so consistency
+  needs no supplied asset.
+- **Per-role presets** — `target` (`content` / `background` / `icon`) tunes
+  ControlNet strength and post-processing.
 
-| Placeholder | Source |
-|-------------|--------|
-| `{{prompt}}` | image prompt (+ theme `image_style`) |
-| `{{negative_prompt}}` | deck/theme negative prompt |
-| `{{width}}` / `{{height}}` | image size (divisible by 8) |
-| `{{seed}}` | per-request seed |
-| `{{checkpoint}}` | `COMFY_API_CHECKPOINT` / auto-discovered |
-| `{{steps}}` / `{{cfg}}` / `{{sampler}}` / `{{scheduler}}` | sampler settings |
-| `{{style_image}}` | theme `style_reference_image` (IP-Adapter) |
-| `{{ip_weight}}` | theme `ip_adapter_weight` |
-| `{{control_image}}` | theme `controlnet.reference_image` |
-| `{{control_strength}}` | theme `controlnet.strength` |
-| `{{upscale_model}}` | theme `upscale_model` |
+## Required custom nodes (only if you want that stage)
 
-## Required custom nodes / models
+- `ComfyUI_IPAdapter_plus` (provides `IPAdapter` / `IPAdapterModelLoader` /
+  `CLIPVisionLoader`) → style consistency.
+- `ComfyUI_ControlNet_Union` (provides `ControlNetLoader` /
+  `ControlNetApplyAdvanced`) → composition control.
+- Any ESRGAN upscaler → `UpscaleModelLoader` / `ImageUpscaleWithModel`.
 
-- `ComfyUI_IPAdapter_plus` (provides `IPAdapter` / `IPAdapterModelLoader`)
-- `ComfyUI_ControlNet_Union` (provides the Union `ControlNetLoader` +
-  `ControlNetApplyAdvanced`; note the `type` input selects depth/canny/pose/tile)
-- `CLIP-ViT-H-14-laion2b-safetensors` (IP-Adapter dependency)
-- `ip-adapter-plus_sdxl_vit-h.safetensors`
-- `controlnet-union-sdxl-1.0.safetensors`
-- `4x-UltraSharp.pth`
-
-## Adapt before use
-
-Node class names and input keys vary between custom-node versions. Adjust the
-graph to match your installed node pack, then point `COMFY_API_WORKFLOW` at this
-file. Remove the Upscale node (14/15 → 12) if you don't want upscaling.
+Each is optional; the graph degrades gracefully when a stage is missing.
