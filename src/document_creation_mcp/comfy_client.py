@@ -168,12 +168,21 @@ def build_consistency_workflow(
     upscale_model: str = "",
     vae: str = "",
     target: str = "content",
+    enable_ip: bool | None = None,
+    enable_cn: bool | None = None,
+    enable_upscale: bool | None = None,
 ) -> dict:
     """Construct a ComfyUI API workflow graph from discovered models.
 
     Nodes are added conditionally based on what ``models`` reports as installed,
     so the same function drives a bare text-to-image graph or a full
     IP-Adapter + ControlNet + upscale pipeline. Returns the API-format dict.
+
+    ``enable_ip`` / ``enable_cn`` / ``enable_upscale`` let a caller force a stage
+    on/off; when ``None`` the stage is enabled only if its model is discovered
+    (and a reference image is available for IP/CN). This is used to retry with a
+    progressively simpler graph when an optional stage crashes on a particular
+    ComfyUI/IP-Adapter version.
     """
     ip_model = _pick_from_list(models.get("ipadapters", []), _IPADAPTER_CANDIDATES)
     cn_model = _pick_from_list(models.get("controlnets", []), _CONTROLNET_CANDIDATES)
@@ -182,9 +191,12 @@ def build_consistency_workflow(
     )
     clip_model = _pick_from_list(models.get("clip_vision", []), _CLIPVISION_CANDIDATES)
 
-    use_ip = bool(ip_model and style_image and clip_model)
-    use_cn = bool(cn_model and control_image)
-    use_upscale = bool(up_model)
+    auto_ip = bool(ip_model and style_image and clip_model)
+    auto_cn = bool(cn_model and control_image)
+    auto_up = bool(up_model)
+    use_ip = enable_ip if enable_ip is not None else auto_ip
+    use_cn = enable_cn if enable_cn is not None else auto_cn
+    use_upscale = enable_upscale if enable_upscale is not None else auto_up
 
     g: dict[str, dict] = {}
     n = 0
@@ -456,7 +468,8 @@ async def generate_image_via_api(
         control_image = await _to_comfy_input_name(base, headers, settings, control_image)
 
     seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
-    workflow = build_consistency_workflow(
+
+    common = dict(
         prompt=prompt,
         negative=negative_prompt or "",
         width=width,
@@ -478,30 +491,64 @@ async def generate_image_via_api(
         vae=vae,
         target=target,
     )
-    client_id = uuid.uuid4().hex
 
+    # Try the richest pipeline first, then progressively drop optional stages
+    # (upscale -> ControlNet -> IP-Adapter) if one of them crashes on this
+    # ComfyUI / custom-node version. The final attempt is always bare
+    # text-to-image, which every SDXL setup supports, so we never fail to
+    # produce an image purely because of an incompatible consistency stage.
+    stages = [
+        {"enable_ip": None, "enable_cn": None, "enable_upscale": None},
+        {"enable_ip": None, "enable_cn": None, "enable_upscale": False},
+        {"enable_ip": None, "enable_cn": False, "enable_upscale": False},
+        {"enable_ip": False, "enable_cn": False, "enable_upscale": False},
+    ]
+    last_exc: Exception | None = None
     async with httpx.AsyncClient(timeout=settings.comfy_timeout) as client:
-        resp = await client.post(
-            f"{base}/prompt",
-            json={"prompt": workflow, "client_id": client_id},
-            headers=headers or None,
-        )
-        resp.raise_for_status()
-        prompt_id = resp.json().get("prompt_id")
-        if not prompt_id:
-            raise ComfyClientError("ComfyUI /prompt did not return a prompt_id.")
+        for i, toggles in enumerate(stages):
+            workflow = build_consistency_workflow(**common, **toggles)
+            try:
+                out_path = await _submit_and_fetch(
+                    client, base, headers, workflow, settings
+                )
+                if i > 0:
+                    print(
+                        f"[warn] image generated with simplified pipeline "
+                        f"(stage {i}: dropped "
+                        f"{'upscale' if i==1 else 'controlnet' if i==2 else 'ip-adapter'}); "
+                        "a consistency stage is incompatible with this ComfyUI setup."
+                    )
+                return str(out_path)
+            except ComfyClientError as exc:
+                last_exc = exc
+                continue
+    raise last_exc or ComfyClientError("ComfyUI image generation failed.")
 
-        outputs = await _wait_for_completion(client, base, prompt_id, headers)
 
-        image_meta = _find_image(outputs)
-        if not image_meta:
-            raise ComfyClientError(f"ComfyUI returned no image. outputs={outputs}")
+async def _submit_and_fetch(client, base: str, headers, workflow: dict, settings) -> str:
+    """Submit a workflow to ComfyUI and return the local path of the output image."""
+    client_id = uuid.uuid4().hex
+    resp = await client.post(
+        f"{base}/prompt",
+        json={"prompt": workflow, "client_id": client_id},
+        headers=headers or None,
+    )
+    resp.raise_for_status()
+    prompt_id = resp.json().get("prompt_id")
+    if not prompt_id:
+        raise ComfyClientError("ComfyUI /prompt did not return a prompt_id.")
 
-        view = await client.get(f"{base}/view", params=image_meta, headers=headers or None)
-        view.raise_for_status()
-        out_path = settings.image_cache_dir / f"img_{prompt_id}.png"
-        out_path.write_bytes(view.content)
-        return str(out_path)
+    outputs = await _wait_for_completion(client, base, prompt_id, headers)
+
+    image_meta = _find_image(outputs)
+    if not image_meta:
+        raise ComfyClientError(f"ComfyUI returned no image. outputs={outputs}")
+
+    view = await client.get(f"{base}/view", params=image_meta, headers=headers or None)
+    view.raise_for_status()
+    out_path = settings.image_cache_dir / f"img_{prompt_id}.png"
+    out_path.write_bytes(view.content)
+    return str(out_path)
 
 
 # Cache one anchor (style-reference) image per deck so all slides share it.
