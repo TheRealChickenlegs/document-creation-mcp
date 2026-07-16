@@ -619,8 +619,10 @@ async def _ensure_anchor_image(
         return _ANCHOR_CACHE[cache_key]
 
     anchor_prompt = f"abstract cohesive brand texture, {theme.image_style}".strip(", ")
-    # Build a minimal (no-IPA) graph for the anchor so we don't recurse.
-    wf = build_consistency_workflow(
+    # Build a minimal (no-IPA) graph for the anchor so we don't recurse, then
+    # submit it through the same staged fallback used for slides so a transient
+    # ComfyUI node crash doesn't kill the whole deck before image generation.
+    common = dict(
         prompt=anchor_prompt,
         negative="text, watermark, blurry, low quality",
         width=min(width, 1024),
@@ -634,27 +636,37 @@ async def _ensure_anchor_image(
         models=models,
         style_image="",
         control_image="",
+        ip_weight=0.0,
+        ip_weight_type=None,
+        control_strength=0.0,
+        control_type=None,
+        upscale_model=None,
+        vae=None,
+        target="background",
     )
-    client_id = uuid.uuid4().hex
+    stages = [
+        {"enable_ip": None, "enable_cn": None, "enable_upscale": None},
+        {"enable_ip": None, "enable_cn": None, "enable_upscale": False},
+        {"enable_ip": None, "enable_cn": False, "enable_upscale": False},
+        {"enable_ip": False, "enable_cn": False, "enable_upscale": False},
+    ]
     async with httpx.AsyncClient(timeout=settings.comfy_timeout) as client:
-        resp = await client.post(
-            f"{base}/prompt", json={"prompt": wf, "client_id": client_id}, headers=headers or None
-        )
-        resp.raise_for_status()
-        pid = resp.json().get("prompt_id")
-        if not pid:
+        for toggles in stages:
+            wf = build_consistency_workflow(**common, **toggles)
+            try:
+                out_path = await _submit_and_fetch(client, base, headers, wf, settings)
+                break
+            except ComfyClientError:
+                continue
+        else:
+            # All stages failed: no anchor available; slides fall back to plain
+            # text-to-image without a shared style reference.
             return ""
-        outputs = await _wait_for_completion(client, base, pid, headers)
-        meta = _find_image(outputs)
-        if not meta:
-            return ""
-        view = await client.get(f"{base}/view", params=meta, headers=headers or None)
-        view.raise_for_status()
         # Keep the anchor on ComfyUI's side: upload to its input folder and
         # cache the name LoadImage can resolve (avoids a local round-trip and a
         # second upload per slide in separate-container deployments).
         tmp = settings.image_cache_dir / f"anchor_{uuid.uuid4().hex}.png"
-        tmp.write_bytes(view.content)
+        tmp.write_bytes(Path(out_path).read_bytes())
         name = await _upload_to_comfy(base, headers, settings, tmp)
         _ANCHOR_CACHE[cache_key] = name
         return name

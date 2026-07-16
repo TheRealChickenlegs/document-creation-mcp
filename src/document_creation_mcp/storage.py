@@ -19,6 +19,19 @@ def _client():
     # (e.g. an open instance or one fronted by an authenticating proxy).
     # When set they are passed through as the S3 access key id / secret
     # access key (the same credentials n8n's S3 node uses).
+    # The MinIO SDK only accepts a host[:port] endpoint — a trailing slash or
+    # any path (e.g. ".../media") raises "path in endpoint is not allowed",
+    # so strip those here. The bucket/prefix are handled separately.
+    endpoint = (settings.minio_endpoint or "").strip()
+    endpoint = endpoint.split("?")[0].split("#")[0].strip()
+    # Split off any scheme (http://, https://) so we can strip a trailing slash
+    # and any path component without eating the "//" of the scheme itself.
+    if "://" in endpoint:
+        scheme, _, rest = endpoint.partition("://")
+        rest = rest.strip("/").split("/", 1)[0]
+        endpoint = f"{scheme}://{rest}"
+    else:
+        endpoint = endpoint.strip("/").split("/", 1)[0]
     kwargs = {
         "secure": settings.minio_use_https,
         "region": settings.minio_region or "us-east-1",
@@ -27,7 +40,7 @@ def _client():
         kwargs["access_key"] = settings.minio_access_key
     if settings.minio_secret_key:
         kwargs["secret_key"] = settings.minio_secret_key
-    return Minio(settings.minio_endpoint, **kwargs)
+    return Minio(endpoint, **kwargs)
 
 
 def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
