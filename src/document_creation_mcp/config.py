@@ -89,7 +89,7 @@ class Settings:
         self.minio_use_https: bool = (
             os.environ.get("MINIO_USE_HTTPS", "false").lower() == "true"
         )
-        self.minio_region: str | None = os.environ.get("MINIO_REGION")
+        self.minio_region: str | None = os.environ.get("MINIO_REGION", "us-east-1")
         # Public base URL (e.g. https://minio.example.com/presentations) → return
         # direct links; otherwise a presigned GET URL is generated.
         self.minio_public_url: str | None = os.environ.get("MINIO_PUBLIC_URL")
@@ -116,6 +116,11 @@ class Settings:
         # path-style reverse-proxy layout).
         self.minio_public_includes_bucket: bool = (
             os.environ.get("MINIO_PUBLIC_INCLUDES_BUCKET", "false").lower() == "true"
+        )
+        # Upload objects with a public-read grant (default on) so browsers and
+        # Open WebUI can fetch them directly, matching n8n's S3 grantRead:true.
+        self.minio_public_read: bool = (
+            os.environ.get("MINIO_PUBLIC_READ", "true").lower() == "true"
         )
 
     def comfy_auth_headers(self) -> dict[str, str]:

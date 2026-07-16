@@ -59,11 +59,13 @@ pip install -e .
 | `DOC_MCP_RETURN_BASE64` | `true` | When `true`, `create_presentation` includes the `.pptx` as base64 (`download` field) in its result so it is retrievable through the chat client without host access. Set `false` to return only the path (e.g. when the output dir is a mounted volume you read directly). |
 | **MinIO / S3 retrieval** (`MINIO_ENDPOINT` set) | | |
 | `MINIO_ENDPOINT` | _(none)_ | MinIO/S3 endpoint, e.g. `minio:9000` or `localhost:9000`. Enables upload whenever set. |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | _(none)_ | **Optional** credentials. Omit for anonymous / proxy-authenticated instances. |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | _(none)_ | S3 access key id / secret access key (the MinIO **username** / **password**). Set these to match the credentials used elsewhere (e.g. an n8n S3 node). Optional only for anonymous / proxy-authenticated instances. |
 | `MINIO_BUCKET` | `presentations` | Target bucket (created if missing). A `path/like/this` value is split into bucket `path` + prefix `like/this/`. |
 | `MINIO_USE_HTTPS` | `false` | Use HTTPS to the endpoint (usually `false` internally). |
-| `MINIO_REGION` | _(none)_ | Optional region. |
-| `MINIO_PUBLIC_URL` | _(none)_ | If set (e.g. `https://minio.example.com/presentations`), a direct link is returned; otherwise a presigned GET URL is generated. |
+| `MINIO_REGION` | `us-east-1` | Region (default `us-east-1`; the value is cosmetic for a local install). |
+| `MINIO_PUBLIC_URL` | _(none)_ | If set (e.g. `https://minio.example.com` **or** `https://minio.example.com/media`), a direct link is returned; otherwise a presigned GET URL is generated. By default the bucket is appended to the path (`{public_url}/{bucket}/{object}` — the standard MinIO path-style reverse-proxy layout). |
+| `MINIO_PUBLIC_INCLUDES_BUCKET` | `false` | Set `true` if `MINIO_PUBLIC_URL` already contains the bucket segment. |
+| `MINIO_PUBLIC_READ` | `true` | Upload objects with a public-read grant so browsers / Open WebUI can fetch them directly (same as n8n's S3 `grantRead: true`). |
 | `MINIO_PRESIGNED_EXPIRY_HOURS` | `168` | Lifetime (hours) of the presigned URL when no public URL is set. |
 | `MINIO_PREFIX` | _(none)_ | Object-name prefix inside the bucket, e.g. `decks/`. |
 
