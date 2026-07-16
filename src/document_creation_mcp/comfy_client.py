@@ -214,8 +214,9 @@ def build_consistency_workflow(
     negative_text = (negative or " ").strip() or " "
 
     ckpt = add("CheckpointLoaderSimple", ckpt_name=checkpoint)
-    pos = add("CLIPTextEncode", text=prompt_text, clip=[ckpt, 0])
-    neg = add("CLIPTextEncode", text=negative_text, clip=[ckpt, 0])
+    # CheckpointLoaderSimple output order is [MODEL(0), CLIP(1), VAE(2)].
+    pos = add("CLIPTextEncode", text=prompt_text, clip=[ckpt, 1])
+    neg = add("CLIPTextEncode", text=negative_text, clip=[ckpt, 1])
 
     model_out = [ckpt, 0]
 
@@ -257,7 +258,7 @@ def build_consistency_workflow(
         )
         pos, neg = [cn_applied, 0], [cn_applied, 1]
 
-    vae_out = [ckpt, 1] if not vae else [add("VAELoader", vae_name=vae), 0]
+    vae_out = [ckpt, 2] if not vae else [add("VAELoader", vae_name=vae), 0]
 
     latent = add(
         "EmptyLatentImage", width=int(width), height=int(height), batch_size=1
