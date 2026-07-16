@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import random
 import uuid
@@ -229,10 +230,14 @@ def _build_workflow(
 _DISCOVERY_CACHE: dict | None = None
 
 
-async def discover_comfy_models() -> dict:
-    """Query the ComfyUI API for installed checkpoints, samplers and schedulers."""
+async def discover_comfy_models(force: bool = False) -> dict:
+    """Query the ComfyUI API for installed checkpoints, samplers and schedulers.
+
+    Results are cached for the process lifetime. Pass ``force=True`` to bypass
+    the cache (e.g. after installing new models on the ComfyUI server).
+    """
     global _DISCOVERY_CACHE
-    if _DISCOVERY_CACHE is not None:
+    if _DISCOVERY_CACHE is not None and not force:
         return _DISCOVERY_CACHE
 
     settings = get_settings()
@@ -418,14 +423,14 @@ async def _extract_image(result, cache_dir: Path) -> str:
         mime = getattr(item, "mime_type", "") or ""
         if data and mime.startswith("image/"):
             ext = mime.split("/")[-1].split(";")[0]
-            path = cache_dir / f"img_{_short_hash(result)}_{len(list(cache_dir.glob('*')))}.{ext}"
+            path = cache_dir / f"img_{uuid.uuid4().hex}.{ext}"
             path.write_bytes(base64.b64decode(data))
             return str(path)
 
         text = getattr(item, "text", None)
         if not text:
             continue
-        candidate = _coerce_to_path(text, cache_dir)
+        candidate = await _coerce_to_path(text, cache_dir)
         if candidate:
             return candidate
 
@@ -435,31 +440,31 @@ async def _extract_image(result, cache_dir: Path) -> str:
     )
 
 
-def _coerce_to_path(text: str, cache_dir: Path) -> str | None:
+async def _coerce_to_path(text: str, cache_dir: Path) -> str | None:
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
             for key in ("image_path", "path", "image", "url", "images", "output"):
                 val = obj.get(key)
                 if isinstance(val, str):
-                    return _resolve_source(val, cache_dir)
+                    return await _resolve_source(val, cache_dir)
                 if isinstance(val, list) and val and isinstance(val[0], str):
-                    return _resolve_source(val[0], cache_dir)
+                    return await _resolve_source(val[0], cache_dir)
         if isinstance(obj, list) and obj and isinstance(obj[0], str):
-            return _resolve_source(obj[0], cache_dir)
+            return await _resolve_source(obj[0], cache_dir)
     except json.JSONDecodeError:
         pass
 
     line = text.strip().splitlines()[0].strip().strip('"\'')
     if line:
-        return _resolve_source(line, cache_dir)
+        return await _resolve_source(line, cache_dir)
     return None
 
 
-def _resolve_source(source: str, cache_dir: Path) -> str:
+async def _resolve_source(source: str, cache_dir: Path) -> str:
     parsed = urlparse(source)
     if parsed.scheme in ("http", "https"):
-        return _download(source, cache_dir)
+        return await _download(source, cache_dir)
     path = Path(source)
     if path.exists():
         return str(path.resolve())
@@ -468,21 +473,13 @@ def _resolve_source(source: str, cache_dir: Path) -> str:
     raise ComfyClientError(f"Image source not found or unsupported: {source}")
 
 
-def _download(url: str, cache_dir: Path) -> str:
-    out = cache_dir / f"img_download_{abs(hash(url))}.png"
-
-    async def _get() -> bytes:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(url, headers=get_settings().comfy_auth_headers() or None)
-            resp.raise_for_status()
-            return resp.content
-
-    import asyncio
-
-    data = asyncio.get_event_loop().run_until_complete(_get())
-    out.write_bytes(data)
+async def _download(url: str, cache_dir: Path) -> str:
+    out = cache_dir / f"img_download_{hashlib.md5(url.encode('utf-8')).hexdigest()}.png"
+    # Reuse a cached file if we already fetched this URL.
+    if out.exists():
+        return str(out)
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(url, headers=get_settings().comfy_auth_headers() or None)
+        resp.raise_for_status()
+        out.write_bytes(resp.content)
     return str(out)
-
-
-def _short_hash(obj: object) -> str:
-    return abs(hash(json.dumps(str(obj), default=str))) % 100000

@@ -31,6 +31,19 @@ _THEME_DIRS = [_USER_THEME_DIR] if _USER_THEME_DIR else []
 if _BUNDLED_THEMES not in _THEME_DIRS:
     _THEME_DIRS.append(_BUNDLED_THEMES)
 
+_THEME_MANAGER: ThemeManager | None = None
+
 
 def get_theme_manager() -> ThemeManager:
-    return ThemeManager(_THEME_DIRS)
+    """Return a cached :class:`ThemeManager` (themes are loaded once)."""
+    global _THEME_MANAGER
+    if _THEME_MANAGER is None:
+        _THEME_MANAGER = ThemeManager(_THEME_DIRS)
+    return _THEME_MANAGER
+
+
+def reload_themes() -> ThemeManager:
+    """Reload theme files from disk and return the refreshed manager."""
+    global _THEME_MANAGER
+    _THEME_MANAGER = ThemeManager(_THEME_DIRS)
+    return _THEME_MANAGER

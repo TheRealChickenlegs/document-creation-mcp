@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import Settings, get_settings
+from .config import get_settings
 
 
 def _client():

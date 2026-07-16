@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 from PIL import Image
@@ -20,10 +19,16 @@ MARGIN = Inches(0.7)
 
 
 def _rgb(hex_color: str) -> RGBColor:
-    cleaned = hex_color.lstrip("#")
-    if len(cleaned) == 3:
-        cleaned = "".join(c * 2 for c in cleaned)
-    return RGBColor.from_string(cleaned)
+    try:
+        cleaned = hex_color.lstrip("#")
+        if len(cleaned) == 3:
+            cleaned = "".join(c * 2 for c in cleaned)
+        if len(cleaned) != 6:
+            raise ValueError("expected 6 hex digits")
+        return RGBColor.from_string(cleaned)
+    except (ValueError, AttributeError):
+        # Fall back to a safe neutral so a bad color never aborts the whole deck.
+        return RGBColor(0x22, 0x22, 0x22)
 
 
 def _image_dimensions(path: str) -> tuple[int, int]:
@@ -99,7 +104,11 @@ async def _resolve_image(slide: SlideSpec, theme: Theme) -> str | None:
     if img is None:
         return None
     if img.source:
-        src = img.source
+        # Validate now so a missing/unsupported source is caught by the
+        # caller's per-slide error handling (instead of failing at draw time).
+        from . import comfy_client
+
+        src = await comfy_client._resolve_source(img.source, get_settings().image_cache_dir)
     else:
         prompt = img.prompt
         if img.use_theme_style and theme.image_style:
@@ -115,6 +124,7 @@ async def _resolve_image(slide: SlideSpec, theme: Theme) -> str | None:
     is_background = img.target == "background" or slide.layout == "image_full"
     if is_background and getattr(theme, "background_post", None):
         src = _postprocess_background(src, theme.background_post, get_settings().image_cache_dir)
+    slide._image_is_background = is_background  # type: ignore[attr-defined]
     return src
 
 
@@ -254,9 +264,19 @@ async def build_presentation(plan: PresentationPlan, theme, output_dir: Path) ->
         slide = prs.slides.add_slide(blank)
         _set_bg(slide, bg_color)
 
-        resolved = await _resolve_image(spec, theme)
+        try:
+            resolved = await _resolve_image(spec, theme)
+        except Exception as exc:  # noqa: BLE001
+            # A failed image must never abort the whole deck (logo is best-effort too).
+            resolved = None
+            print(f"[warn] slide '{spec.title}': image generation failed: {exc}")
         if resolved:
             slide._resolved_image = resolved  # type: ignore[attr-defined]
+            # A background image is placed full-bleed behind the content. This
+            # applies to `image.target == "background"` on any layout, and to the
+            # dedicated `image_full` layout.
+            if getattr(slide, "_image_is_background", False) and spec.layout != "image_full":
+                _place_image(slide, resolved, Emu(0), Emu(0), SLIDE_W, SLIDE_H)
 
         layout = spec.layout
         if layout == "title_and_content" and spec.image and spec.image.target == "background":

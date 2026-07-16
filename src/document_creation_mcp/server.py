@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from . import get_theme_manager
 from .config import get_settings
-from .models import ImageSpec, PresentationPlan, SlideSpec
+from .models import PresentationPlan
 from .pptx_builder import build_presentation
 
 _HOST = os.environ.get("DOC_MCP_HOST", "127.0.0.1")
@@ -21,13 +20,19 @@ _STREAMABLE_HTTP_PATH = os.environ.get("DOC_MCP_STREAMABLE_HTTP_PATH", "/mcp")
 # different nodes or without a session id (avoids 404s on /mcp).
 _STATELESS_HTTP = os.environ.get("DOC_MCP_STATELESS_HTTP", "true").lower() == "true"
 
-mcp = FastMCP(
-    "document-creation-mcp",
-    host=_HOST,
-    port=_PORT,
-    streamable_http_path=_STREAMABLE_HTTP_PATH,
-    stateless_http=_STATELESS_HTTP,
-)
+# Build the FastMCP server. Newer releases accept host/port and the
+# streamable-HTTP options below; if an installed version does not, fall back to
+# the minimal constructor so the server still starts (stdio transport).
+try:
+    mcp = FastMCP(
+        "document-creation-mcp",
+        host=_HOST,
+        port=_PORT,
+        streamable_http_path=_STREAMABLE_HTTP_PATH,
+        stateless_http=_STATELESS_HTTP,
+    )
+except TypeError:  # pragma: no cover - depends on installed mcp version
+    mcp = FastMCP("document-creation-mcp")
 
 
 @mcp.tool()
@@ -50,6 +55,7 @@ async def generate_image(
     size: str = "1024x1024",
     negative_prompt: str | None = None,
     target: str = "content",
+    use_theme_style: bool = True,
 ) -> str:
     """Generate a single image via the ComfyUI MCP server and return its local path.
 
@@ -59,30 +65,36 @@ async def generate_image(
         size: Output size, e.g. "1024x1024".
         negative_prompt: Optional negative prompt.
         target: "content" or "background".
+        use_theme_style: When true (default), the theme's `image_style` is
+            appended to the prompt for visual consistency.
     """
     from . import comfy_client
 
     theme_obj = get_theme_manager().get(theme)
     full_prompt = prompt
-    if theme_obj.image_style:
+    if use_theme_style and theme_obj.image_style:
         full_prompt = f"{prompt}, {theme_obj.image_style}"
     return await comfy_client.generate_image(
-        full_prompt, negative_prompt=negative_prompt, size=size, theme=theme_obj
+        full_prompt,
+        negative_prompt=negative_prompt,
+        size=size,
+        theme=theme_obj,
     )
 
 
 @mcp.tool()
-async def list_comfy_models() -> str:
+async def list_comfy_models(force: bool = False) -> str:
     """List models available on the ComfyUI HTTP API (checkpoints/samplers/schedulers).
 
     Useful to see what the direct `comfy_api` backend can use, and to pick a
     value for COMFY_API_CHECKPOINT. Requires IMAGE_BACKEND=comfy_api and
-    COMFY_API_URL to be set.
+    COMFY_API_URL to be set. Set ``force=True`` to bypass the in-memory cache
+    (e.g. after installing new models on the ComfyUI server).
     """
     from . import comfy_client
 
     try:
-        models = await comfy_client.discover_comfy_models()
+        models = await comfy_client.discover_comfy_models(force=force)
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": str(exc)})
     return json.dumps(models)
@@ -142,6 +154,7 @@ async def create_presentation(plan: PresentationPlan) -> str:
             download["url"] = storage.upload_file(out_path, bucket_override=plan.bucket)
         except Exception as exc:  # noqa: BLE001
             download["minio_error"] = str(exc)
+            result["status"] = "partial"
     if settings.return_base64:
         import base64
 
