@@ -110,6 +110,13 @@ class Settings:
         # keys are OPTIONAL: many deployments (or reverse-proxy fronted
         # instances) require no auth, in which case we connect anonymously.
         self.minio_enabled: bool = bool(self.minio_endpoint)
+        # When true, MINIO_PUBLIC_URL already contains the bucket segment and
+        # the returned link is {public_url}/{object}; when false (default) the
+        # bucket is appended: {public_url}/{bucket}/{object} (standard MinIO
+        # path-style reverse-proxy layout).
+        self.minio_public_includes_bucket: bool = (
+            os.environ.get("MINIO_PUBLIC_INCLUDES_BUCKET", "false").lower() == "true"
+        )
 
     def comfy_auth_headers(self) -> dict[str, str]:
         key = self.comfy_mcp_api_key or self.comfy_api_key

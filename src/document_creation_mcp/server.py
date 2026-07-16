@@ -153,7 +153,12 @@ async def create_presentation(plan: PresentationPlan) -> str:
         try:
             from . import storage
 
-            download["url"] = storage.upload_file(out_path, bucket_override=plan.bucket)
+            url = storage.upload_file(out_path, bucket_override=plan.bucket)
+            download["url"] = url
+            # The local path lives inside the MCP container and is unreachable
+            # from Open WebUI; once we have a working remote URL, drop it so
+            # clients don't present a broken /output directory link.
+            result.pop("path", None)
         except Exception as exc:  # noqa: BLE001
             download["minio_error"] = str(exc)
             result["status"] = "partial"

@@ -35,6 +35,11 @@ def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
     Uses the bucket from env (``MINIO_BUCKET``) or *bucket_override* when given.
     Returns a public URL when ``MINIO_PUBLIC_URL`` is set, otherwise a presigned
     GET URL valid for ``MINIO_PRESIGNED_EXPIRY_HOURS``.
+
+    When a reverse proxy fronts MinIO (the usual Docker setup), the bucket is
+    addressed as a path segment, so the public URL is built as
+    ``{MINIO_PUBLIC_URL}/{bucket}/{object_name}``. Set ``MINIO_PUBLIC_INCLUDES_BUCKET=true``
+    only if your public URL already embeds the bucket.
     """
     from datetime import timedelta
 
@@ -52,10 +57,16 @@ def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
         # real error if the bucket truly cannot be used.
         pass
 
+    # fput_object raises on any real failure (auth, missing bucket, network);
+    # let it propagate so callers can report a clear minio_error instead of
+    # silently falling back to an unreachable local path.
     client.fput_object(bucket, object_name, str(local_path))
 
     if settings.minio_public_url:
-        return f"{settings.minio_public_url.rstrip('/')}/{object_name}"
+        public = settings.minio_public_url.rstrip("/")
+        if settings.minio_public_includes_bucket:
+            return f"{public}/{object_name}"
+        return f"{public}/{bucket}/{object_name}"
     return client.presigned_get_object(
         bucket,
         object_name,
