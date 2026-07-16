@@ -434,10 +434,16 @@ async def generate_image_via_api(
         style_image = await _ensure_anchor_image(
             base, headers, settings, models, checkpoint, sampler, scheduler, theme, width, height
         )
+    # ComfyUI and this server may be separate containers: upload any local
+    # reference image to ComfyUI's input folder so LoadImage can read it.
+    if style_image:
+        style_image = await _to_comfy_input_name(base, headers, settings, style_image)
 
     # --- ControlNet composition reference: reuse the style image (or theme
     # controlnet.reference_image) so subjects sit off-centre for text space.
     control_image = (getattr(cn, "reference_image", None) if cn else None) or style_image
+    if control_image:
+        control_image = await _to_comfy_input_name(base, headers, settings, control_image)
 
     seed = settings.comfy_api_seed or random.randint(0, 2**32 - 1)
     workflow = build_consistency_workflow(
@@ -496,6 +502,51 @@ def _resolve_style_reference(theme, target: str) -> str:
     return getattr(theme, "style_reference_image", None) or ""
 
 
+async def _to_comfy_input_name(
+    base: str, headers, settings, image_ref: str
+) -> str:
+    """Resolve an image reference into a name ComfyUI's LoadImage can read.
+
+    The MCP server and ComfyUI often run in separate containers/filesystems, so
+    a local path on the MCP side is invisible to ComfyUI. For any local file we
+    upload it to ComfyUI's ``input/`` folder via ``/upload/image`` and return
+    the stored basename (which ``LoadImage`` resolves under ``input/``). URLs
+    and names that already look like ComfyUI inputs are returned unchanged.
+    """
+    if not image_ref:
+        return image_ref
+    parsed = urlparse(image_ref)
+    # Already a bare ComfyUI input name (no scheme, no directory) -> use as-is.
+    if parsed.scheme == "" and "/" not in parsed.path and "\\" not in parsed.path:
+        return image_ref
+    # Remote URL: ComfyUI cannot fetch it directly; download then upload.
+    local = image_ref
+    if parsed.scheme in ("http", "https"):
+        local = await _download(image_ref, settings.image_cache_dir)
+    path = Path(local)
+    if not path.exists():
+        # Nothing we can do; let ComfyUI report the missing file.
+        return image_ref
+    return await _upload_to_comfy(base, headers, settings, path)
+
+
+async def _upload_to_comfy(base: str, headers, settings, path: Path) -> str:
+    """Upload a local image to ComfyUI's input folder; return its stored name."""
+    async with httpx.AsyncClient(timeout=60) as client:
+        files = {
+            "image": (path.name, path.read_bytes(), "image/png"),
+            "overwrite": "true",
+        }
+        resp = await client.post(
+            f"{base}/upload/image", files=files, headers=headers or None
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    # ComfyUI returns {"name": "x.png", "subfolder": "", "type": "input"}.
+    name = data.get("name") or path.name
+    return name
+
+
 async def _ensure_anchor_image(
     base: str, headers, settings, models, checkpoint, sampler, scheduler, theme, width, height
 ) -> str:
@@ -541,10 +592,14 @@ async def _ensure_anchor_image(
             return ""
         view = await client.get(f"{base}/view", params=meta, headers=headers or None)
         view.raise_for_status()
-        out = settings.image_cache_dir / f"anchor_{uuid.uuid4().hex}.png"
-        out.write_bytes(view.content)
-        _ANCHOR_CACHE[cache_key] = str(out)
-        return str(out)
+        # Keep the anchor on ComfyUI's side: upload to its input folder and
+        # cache the name LoadImage can resolve (avoids a local round-trip and a
+        # second upload per slide in separate-container deployments).
+        tmp = settings.image_cache_dir / f"anchor_{uuid.uuid4().hex}.png"
+        tmp.write_bytes(view.content)
+        name = await _upload_to_comfy(base, headers, settings, tmp)
+        _ANCHOR_CACHE[cache_key] = name
+        return name
 
 
 async def _wait_for_completion(client, base: str, prompt_id: str, headers) -> dict:
