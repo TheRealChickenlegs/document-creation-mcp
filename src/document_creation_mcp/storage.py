@@ -15,13 +15,18 @@ def _client():
         ) from exc
 
     settings = get_settings()
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_use_https,
-        region=settings.minio_region,
-    )
+    # Access/secret keys are optional: when unset we connect anonymously
+    # (e.g. an open instance or one fronted by an authenticating proxy).
+    kwargs = {
+        "secure": settings.minio_use_https,
+    }
+    if settings.minio_region:
+        kwargs["region"] = settings.minio_region
+    if settings.minio_access_key:
+        kwargs["access_key"] = settings.minio_access_key
+    if settings.minio_secret_key:
+        kwargs["secret_key"] = settings.minio_secret_key
+    return Minio(settings.minio_endpoint, **kwargs)
 
 
 def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
@@ -36,12 +41,15 @@ def upload_file(local_path: Path, bucket_override: str | None = None) -> str:
     settings = get_settings()
     client = _client()
     bucket = bucket_override or settings.minio_bucket
-    object_name = f"{settings.minio_prefix}{Path(local_path).name}".replace("//", "/")
+    object_name = f"{settings.minio_prefix}{Path(local_path).name}".replace("//", "/").strip("/")
 
     try:
-        client.make_bucket(bucket)
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
     except Exception:
-        # BucketAlreadyOwnedByYou / BucketAlreadyExists are expected.
+        # BucketAlreadyOwnedByYou / BucketAlreadyExists / anonymous access
+        # restrictions are all non-fatal here — fput_object will surface a
+        # real error if the bucket truly cannot be used.
         pass
 
     client.fput_object(bucket, object_name, str(local_path))

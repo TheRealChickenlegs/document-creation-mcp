@@ -96,11 +96,20 @@ class Settings:
         self.minio_presigned_expiry_hours: int = int(
             os.environ.get("MINIO_PRESIGNED_EXPIRY_HOURS", "168")
         )
-        # Object-name prefix inside the bucket, e.g. "decks/".
-        self.minio_prefix: str = os.environ.get("MINIO_PREFIX", "")
-        self.minio_enabled: bool = bool(
-            self.minio_endpoint and self.minio_access_key and self.minio_secret_key
+        # Object-name prefix inside the bucket, e.g. "decks/". A value such as
+        # "media/presentations" (common in compose setups) is split into a
+        # bucket ("media") plus a path prefix ("presentations/") automatically.
+        raw_bucket = os.environ.get("MINIO_BUCKET", "presentations")
+        parts = [p for p in raw_bucket.split("/") if p]
+        self.minio_bucket: str = parts[0] if parts else "presentations"
+        self.minio_prefix: str = (
+            os.environ.get("MINIO_PREFIX", "")
+            or ("/".join(parts[1:]) + "/" if len(parts) > 1 else "")
         )
+        # MinIO is enabled whenever an endpoint is configured. Access/secret
+        # keys are OPTIONAL: many deployments (or reverse-proxy fronted
+        # instances) require no auth, in which case we connect anonymously.
+        self.minio_enabled: bool = bool(self.minio_endpoint)
 
     def comfy_auth_headers(self) -> dict[str, str]:
         key = self.comfy_mcp_api_key or self.comfy_api_key

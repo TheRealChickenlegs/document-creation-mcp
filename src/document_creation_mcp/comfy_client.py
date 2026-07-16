@@ -161,6 +161,7 @@ def build_consistency_workflow(
     models: dict[str, list[str]],
     style_image: str = "",
     ip_weight: float = 0.7,
+    ip_weight_type: str | None = None,
     control_image: str = "",
     control_strength: float = 0.0,
     control_type: str = "depth",
@@ -194,9 +195,15 @@ def build_consistency_workflow(
         g[str(n)] = {"class_type": class_type, "inputs": inputs}
         return str(n)
 
+    # ComfyUI's cond_has_hooks crashes (IndexError on an empty string) when a
+    # CLIPTextEncode receives an empty prompt, producing a zero-length
+    # conditioning. Never emit an empty string here.
+    prompt_text = (prompt or " ").strip() or " "
+    negative_text = (negative or " ").strip() or " "
+
     ckpt = add("CheckpointLoaderSimple", ckpt_name=checkpoint)
-    pos = add("CLIPTextEncode", text=prompt, clip=[ckpt, 0])
-    neg = add("CLIPTextEncode", text=negative, clip=[ckpt, 0])
+    pos = add("CLIPTextEncode", text=prompt_text, clip=[ckpt, 0])
+    neg = add("CLIPTextEncode", text=negative_text, clip=[ckpt, 0])
 
     model_out = [ckpt, 0]
 
@@ -204,20 +211,22 @@ def build_consistency_workflow(
     if use_ip:
         clipvision = add("CLIPVisionLoader", clip_name=clip_model)
         ip = add("IPAdapterModelLoader", model_name=ip_model)
-        ip_applied = add(
-            "IPAdapter",
+        ip_inputs = dict(
             model=[ckpt, 0],
             ipadapter=[ip, 0],
             image=add("LoadImage", image=style_image),
             clip_vision=[clipvision, 0],
             weight=float(ip_weight),
-            noise=0.0,
-            weight_type="style transfer (medium)",
             start_at=0.0,
             end_at=1.0,
-            unfold_batch=False,
-            embeds_scaling="V only",
         )
+        # Only send version-sensitive fields when explicitly configured. The
+        # IPAdapter node's accepted `weight_type`/`embeds_scaling` enum varies
+        # between ComfyUI_IPAdapter_plus releases; omitting them lets the node
+        # use its own default and avoids invalid-enum conditioning crashes.
+        if ip_weight_type:
+            ip_inputs["weight_type"] = ip_weight_type
+        ip_applied = add("IPAdapter", **ip_inputs)
         model_out = [ip_applied, 0]
 
     # --- ControlNet: steer composition (off-centre subject for text space) ---
@@ -395,6 +404,7 @@ async def generate_image_via_api(
     target = getattr(theme, "_current_target", None) or "content"
     # --- Consistency values from the theme (IP-Adapter / ControlNet / upscale) ---
     ip_weight = getattr(theme, "ip_adapter_weight", 0.7) or 0.7
+    ip_weight_type = getattr(theme, "ip_adapter_weight_type", None)
     cn = getattr(theme, "controlnet", None)
     control_type = getattr(cn, "type", "depth") or "depth"
     # Defaults tuned per role; a theme may override strength/type via `controlnet`.
@@ -460,6 +470,7 @@ async def generate_image_via_api(
         models=models,
         style_image=style_image,
         ip_weight=ip_weight,
+        ip_weight_type=ip_weight_type,
         control_image=control_image,
         control_strength=control_strength,
         control_type=control_type,
@@ -617,7 +628,20 @@ async def _wait_for_completion(client, base: str, prompt_id: str, headers) -> di
         if prompt_id in data:
             entry = data[prompt_id]
             if entry.get("status", {}).get("status_str") == "error":
-                raise ComfyClientError(f"ComfyUI job failed: {entry.get('status')}")
+                # Extract the concise failure info ComfyUI embeds rather than
+                # dumping the whole (huge) status object.
+                msg = "ComfyUI job failed"
+                for msg_pair in entry.get("status", {}).get("messages", []):
+                    if len(msg_pair) >= 2 and isinstance(msg_pair[1], dict):
+                        exc = msg_pair[1]
+                        if exc.get("exception_type") or exc.get("exception_message"):
+                            msg = (
+                                f"ComfyUI node {exc.get('node_type', '?')} "
+                                f"({exc.get('exception_type', 'error')}): "
+                                f"{exc.get('exception_message', '')}"
+                            )
+                            break
+                raise ComfyClientError(msg)
             if entry.get("outputs"):
                 return entry["outputs"]
     raise ComfyClientError("Timed out waiting for ComfyUI image generation.")

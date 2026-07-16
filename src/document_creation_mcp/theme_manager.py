@@ -39,6 +39,10 @@ class Theme(BaseModel):
     # the same style/colour mood. Path or URL.
     style_reference_image: str | None = None
     ip_adapter_weight: float = 0.7
+    # IP-Adapter weight_type (e.g. "style transfer (medium)", "linear").
+    # Left unset to let the node use its own default across ComfyUI_IPAdapter_plus
+    # versions, which accept different enum values.
+    ip_adapter_weight_type: str | None = None
     controlnet: ControlNetConfig = Field(default_factory=ControlNetConfig)
     # ESRGAN model name for the final upscale, e.g. "4x-UltraSharp.pth".
     upscale_model: str | None = None

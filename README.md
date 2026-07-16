@@ -58,9 +58,9 @@ pip install -e .
 | `DOC_MCP_DISABLE_IMAGES` | `false` | Skip all image generation. |
 | `DOC_MCP_RETURN_BASE64` | `true` | When `true`, `create_presentation` includes the `.pptx` as base64 (`download` field) in its result so it is retrievable through the chat client without host access. Set `false` to return only the path (e.g. when the output dir is a mounted volume you read directly). |
 | **MinIO / S3 retrieval** (`MINIO_ENDPOINT` set) | | |
-| `MINIO_ENDPOINT` | _(none)_ | MinIO/S3 endpoint, e.g. `minio:9000` or `localhost:9000`. Enables upload when set with keys. |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | _(none)_ | Credentials for the bucket. |
-| `MINIO_BUCKET` | `presentations` | Target bucket (created if missing). |
+| `MINIO_ENDPOINT` | _(none)_ | MinIO/S3 endpoint, e.g. `minio:9000` or `localhost:9000`. Enables upload whenever set. |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | _(none)_ | **Optional** credentials. Omit for anonymous / proxy-authenticated instances. |
+| `MINIO_BUCKET` | `presentations` | Target bucket (created if missing). A `path/like/this` value is split into bucket `path` + prefix `like/this/`. |
 | `MINIO_USE_HTTPS` | `false` | Use HTTPS to the endpoint (usually `false` internally). |
 | `MINIO_REGION` | _(none)_ | Optional region. |
 | `MINIO_PUBLIC_URL` | _(none)_ | If set (e.g. `https://minio.example.com/presentations`), a direct link is returned; otherwise a presigned GET URL is generated. |
@@ -241,6 +241,8 @@ name: dark_tech
 image_style: "cinematic, neon accents, dark moody background, 8k, highly detailed"
 style_reference_image: "themes/refs/dark_tech_style.png"  # optional; auto-generated if omitted
 ip_adapter_weight: 0.7
+ip_adapter_weight_type: null   # optional; omit so the node uses its own default
+                               # (enum varies between IP-Adapter versions)
 controlnet:
   enabled: true
   type: depth          # depth | canny | openpose | tile
