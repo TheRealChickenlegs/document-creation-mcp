@@ -261,9 +261,9 @@ def build_consistency_workflow(
         upscaled = add(
             "ImageUpscaleWithModel", upscale_model=[up, 0], image=[decoded, 0]
         )
-        add("SaveImage", images=[upscaled, 0])
+        add("SaveImage", images=[upscaled, 0], filename_prefix="doc_mcp")
     else:
-        add("SaveImage", images=[decoded, 0])
+        add("SaveImage", images=[decoded, 0], filename_prefix="doc_mcp")
 
     return g
 
@@ -325,15 +325,32 @@ async def discover_comfy_models(force: bool = False) -> dict:
 
 
 def _pick_checkpoint(discovered: list[str], configured: str) -> str:
-    """Prefer an explicit config; otherwise auto-select (SDXL-style first)."""
-    if configured:
+    """Choose a checkpoint from the discovered list.
+
+    If ``configured`` exactly matches an installed checkpoint it is used (so an
+    explicit, correct override is honoured). Otherwise we auto-select from the
+    discovered models (SDXL-style preferred), ignoring a configured name that
+    does not exist on the server — this is what makes zero-config discovery
+    actually work when the default does not match the instance's filenames.
+    """
+    pool = discovered or []
+    if configured and configured in pool:
         return configured
-    if not discovered:
-        return ""
-    for name in discovered:
-        if "xl" in name.lower():
+    if not pool:
+        # No discovery data: best effort with whatever was configured.
+        return configured
+    low = [n.lower() for n in pool]
+    # Prefer an SDXL *base* checkpoint; avoid turbo/refiner/sd3 fast variants.
+    for name, lname in zip(pool, low):
+        if "base" in lname and ("xl" in lname or "sdxl" in lname):
             return name
-    return discovered[0]
+    for name, lname in zip(pool, low):
+        if "xl" in lname and "turbo" not in lname and "refiner" not in lname:
+            return name
+    for name, lname in zip(pool, low):
+        if "turbo" not in lname and "refiner" not in lname and "sd3" not in lname:
+            return name
+    return pool[0]
 
 
 def _pick_from_list(discovered: list[str], candidates: list[str], configured: str | None = None) -> str:
